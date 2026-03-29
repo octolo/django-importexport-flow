@@ -1,0 +1,4 @@
+Book title,Nb. of pages,Price,Publication date,Recorded at,Author name,Extra metadata
+The Habit of Excellence,320,29.99,2020-03-01,2020-03-01T09:30:00,Ada Lovelace,"{""genre"":""leadership"",""tags"":[""business"",""habits""]}"
+Django pour les admins,512,45.50,2021-06-15,2021-06-15T14:00:00,Guido van Rossum,"{""genre"":""tech"",""tags"":[""django"",""admin""]}"
+Notes de cours,120,12.00,2022-09-01,2022-09-01T08:15:00,Marie Curie,"{""genre"":""science"",""tags"":[""notes"",""cours""]}"

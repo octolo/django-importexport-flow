@@ -1,0 +1,22 @@
+{% extends "admin_boost/change_form.html" %}
+{% load i18n %}
+
+{# Ensure multipart uploads: admin/change_form only sets enctype when has_file_field is true;
+   older django-boosted builds omit it; this fixes the form attribute on the client. #}
+{% block extrahead %}{{ block.super }}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var f = document.getElementById("{{ opts.model_name }}_form");
+  if (f) {
+    f.setAttribute("enctype", "multipart/form-data");
+  }
+});
+</script>
+{% endblock %}
+
+{% block content %}
+<p class="help">
+  {% trans "Upload a CSV, Excel, or JSON file whose columns match the example export exactly. Fill filter fields when required, then review the preview and confirm." %}
+</p>
+{{ block.super }}
+{% endblock %}
