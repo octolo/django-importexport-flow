@@ -9,7 +9,7 @@ from django.db import models
 from django.db.models import JSONField, ManyToManyField
 from django.utils.translation import gettext_lazy as _
 
-from .helpers import (
+from ...utils.helpers import (
     M2M_SLOT_PATH_PATTERN,
     _next_model_for_rel_field,
     get_field_or_accessor,
@@ -63,7 +63,9 @@ def parse_filter_maps(
     return fr, mandatory, get_m, kw_map
 
 
-def parse_filter_maps_from_definition(definition: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+def parse_filter_maps_from_definition(
+    definition: Any,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Same as :func:`parse_filter_maps` but reads attributes from a report-like object."""
     return parse_filter_maps(
         getattr(definition, "filter_request", None),
@@ -91,9 +93,7 @@ def validate_filter_kwargs_for_model(
             )
 
 
-def coerce_request_filter_value(
-    model: type[models.Model], orm_key: str, raw: str
-) -> Any:
+def coerce_request_filter_value(model: type[models.Model], orm_key: str, raw: str) -> Any:
     """
     Coerce GET string values for simple field names; leave text lookups and
     compound keys mostly unchanged.
@@ -123,8 +123,11 @@ def coerce_request_filter_value(
             return raw
     try:
         return field.to_python(raw)
-    except Exception:
-        return raw
+    except Exception as exc:
+        raise ValidationError(
+            _("Invalid filter value %(value)r for %(lookup)s: %(err)s")
+            % {"value": raw, "lookup": orm_key, "err": exc}
+        ) from exc
 
 
 def validate_export_column_spec(model: type[models.Model], spec: str) -> None:
@@ -210,9 +213,7 @@ def validate_filter_request_mandatory_get_overlap(
             )
 
 
-def validate_filter_mandatory_for_model(
-    model: type[models.Model], mandatory: Any
-) -> None:
+def validate_filter_mandatory_for_model(model: type[models.Model], mandatory: Any) -> None:
     """
     ``filter_mandatory``: ``{"get": {...}, "kwargs": {...}}``, or shorthand
     ``{query_param: orm_key}`` (all GET) when ``get`` / ``kwargs`` keys are absent.
@@ -261,9 +262,7 @@ def validate_order_by_for_model(model: type[models.Model], order_by: Any) -> Non
             continue
         if get_field_or_accessor(model, base) is None:
             raise ValidationError(
-                _(
-                    "Invalid order_by: %(expr)r — %(base)r is not a field on %(model)s."
-                )
+                _("Invalid order_by: %(expr)r — %(base)r is not a field on %(model)s.")
                 % {"expr": expr.strip(), "base": base, "model": model.__name__}
             )
 
@@ -285,9 +284,7 @@ def validate_export_filter_fields(
     validate_order_by_for_model(model, order_by)
 
 
-def validate_export_column_specs(
-    model: type[models.Model], columns: list[Any] | None
-) -> None:
+def validate_export_column_specs(model: type[models.Model], columns: list[Any] | None) -> None:
     if not columns:
         return
     for col in columns:
@@ -305,9 +302,7 @@ def resolve_manager_to_queryset(model: type[models.Model], manager_path: str) ->
             qs = qs()
     if not hasattr(qs, "filter"):
         raise ValidationError(
-            _(
-                "Manager path “%(path)s” must resolve to a manager or queryset (got %(got)s)."
-            )
+            _("Manager path “%(path)s” must resolve to a manager or queryset (got %(got)s).")
             % {"path": manager_path, "got": type(qs).__name__}
         )
     return qs

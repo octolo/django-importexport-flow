@@ -5,14 +5,24 @@ from __future__ import annotations
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from ..models import ExportRequest
+from ..models import ExportRequest, ExportRequestRelatedObject
+
+
+class ExportRequestRelatedObjectInline(admin.TabularInline):
+    model = ExportRequestRelatedObject
+    extra = 0
+    fields = ("content_type", "object_id", "object_str")
+    readonly_fields = ("object_str",)
 
 
 @admin.register(ExportRequest)
 class ExportRequestAdmin(admin.ModelAdmin):
+    inlines = (ExportRequestRelatedObjectInline,)
+
     list_display = (
         "uuid",
         "export_definition",
+        "related_scope_summary",
         "export_format",
         "status",
         "output_bytes",
@@ -41,6 +51,23 @@ class ExportRequestAdmin(admin.ModelAdmin):
         "updated_at",
     )
     ordering = ("-created_at",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("related_object_links")
+
+    @admin.display(description=_("Related scope"))
+    def related_scope_summary(self, obj: ExportRequest) -> str:
+        all_links = list(obj.related_object_links.all())
+        if not all_links:
+            return "—"
+        parts = [
+            link.object_str or f"{link.content_type_id}:{link.object_id}"
+            for link in all_links[:5]
+        ]
+        out = "; ".join(parts)
+        if len(all_links) > 5:
+            out += "…"
+        return out
 
     def has_add_permission(self, request):
         """Rows are created by *Generate export* only."""

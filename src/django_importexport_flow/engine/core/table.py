@@ -4,8 +4,8 @@ from typing import Any
 
 import pandas as pd
 
-from ..models import ImportDefinition, ExportConfigTable
-from ..utils import (
+from ...models import ImportDefinition, ExportConfigTable
+from ...utils.helpers import (
     get_expanded_related_value,
     get_value_from_path,
     max_relation_counts,
@@ -15,7 +15,7 @@ from ..utils import (
     resolve_table_column_label,
     verbose_name_for_field_path,
 )
-from .core import CoreEngine
+from .engine import CoreEngine
 
 
 def _format_cell_export_value(value: Any) -> Any:
@@ -43,7 +43,7 @@ class TableEngine(CoreEngine):
 
     def _parse_column_pieces(self) -> list[tuple[Any, ...]]:
         if isinstance(self.definition, ImportDefinition):
-            from ..utils.import_tabular import effective_import_column_paths
+            from .paths import effective_import_column_paths
 
             raw = effective_import_column_paths(self.definition)
         else:
@@ -119,9 +119,7 @@ class TableEngine(CoreEngine):
         if col["kind"] == "scalar":
             raw = get_value_from_path(obj, col["data"])
             return _format_cell_export_value(raw)
-        raw = get_expanded_related_value(
-            obj, col["relation"], col["slot"], col["field"]
-        )
+        raw = get_expanded_related_value(obj, col["relation"], col["slot"], col["field"])
         return _format_cell_export_value(raw)
 
     @classmethod
@@ -129,9 +127,7 @@ class TableEngine(CoreEngine):
         """Raw values for pandas (dict/list preserved for ``to_json``)."""
         if col["kind"] == "scalar":
             return get_value_from_path(obj, col["data"])
-        return get_expanded_related_value(
-            obj, col["relation"], col["slot"], col["field"]
-        )
+        return get_expanded_related_value(obj, col["relation"], col["slot"], col["field"])
 
     def get_columns(self):
         if not self.config:
@@ -160,10 +156,7 @@ class TableEngine(CoreEngine):
 
     def get_rows(self):
         cols = self._get_flat_columns()
-        return [
-            [self._cell_value(obj, c) for c in cols]
-            for obj in self._queryset_for_table()
-        ]
+        return [[self._cell_value(obj, c) for c in cols] for obj in self._queryset_for_table()]
 
     def get_dataframe(self) -> pd.DataFrame:
         """Rows as a DataFrame with verbose column labels and native cell values."""
@@ -172,8 +165,7 @@ class TableEngine(CoreEngine):
         cols = self._get_flat_columns()
         headers = [c["label"] for c in cols]
         records = [
-            [self._cell_value_native(obj, c) for c in cols]
-            for obj in self._queryset_for_table()
+            [self._cell_value_native(obj, c) for c in cols] for obj in self._queryset_for_table()
         ]
         return pd.DataFrame.from_records(records, columns=headers)
 

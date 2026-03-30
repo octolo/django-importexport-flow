@@ -2,7 +2,7 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 
 from django_importexport_flow.models import ExportDefinition
-from django_importexport_flow.utils import get_export_definitions
+from django_importexport_flow.utils.helpers import get_export_definitions
 from tests.sample.models import Author, Book
 
 

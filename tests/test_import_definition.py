@@ -1,5 +1,11 @@
+"""Tests for ImportDefinition paths, wizard/admin flows, and legacy JSON labels.
+
+Formerly ``test_report_import.py`` (django-reporting naming).
+"""
+
 import copy
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -8,7 +14,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
 
 from django_importexport_flow.engine import ExportTableEngine
-from django_importexport_flow.utils.import_tabular import (
+from django_importexport_flow.engine.core.import_ import (
     IMPORT_COLUMN_PATHS_KEY,
     default_importable_column_paths,
     effective_import_column_paths,
@@ -16,9 +22,12 @@ from django_importexport_flow.utils.import_tabular import (
     sample_headers_for_import_definition,
     validate_import_preview,
 )
-from django_importexport_flow.utils import resolve_table_column_label
+from django_importexport_flow.utils.helpers import resolve_table_column_label
 from django_importexport_flow.models import ImportDefinition
-from django_importexport_flow.utils.serialization import import_import_definition, serialize_import_definition
+from django_importexport_flow.utils.serialization import (
+    import_import_definition,
+    serialize_import_definition,
+)
 from tests.sample.models import Author, Book
 
 
@@ -39,7 +48,7 @@ def test_default_import_paths_author_includes_reverse_fk_slots():
 
 @pytest.mark.django_db
 def test_resolve_table_column_label_book_set_slot():
-    from django_importexport_flow.utils import resolve_table_column_label
+    from django_importexport_flow.utils.helpers import resolve_table_column_label
 
     assert "Book title" in resolve_table_column_label(Author, "book_set.0.title")
 
@@ -111,13 +120,13 @@ def test_default_import_paths_book_no_id_bare_author_or_author_pk():
 
 @pytest.mark.django_db
 def test_resolve_table_column_label_author_profile_bio():
-    from django_importexport_flow.utils import resolve_table_column_label
+    from django_importexport_flow.utils.helpers import resolve_table_column_label
 
     assert resolve_table_column_label(Book, "author.profile.bio") == "Biography"
 
 
 @pytest.mark.django_db
-def test_table_engine_with_report_import():
+def test_table_engine_with_import_definition():
     ct = ContentType.objects.get_for_model(Book)
     book = Book.objects.create(title="Guide", pages=42)
     ri = ImportDefinition.objects.create(
@@ -137,7 +146,7 @@ def test_table_engine_with_report_import():
 
 
 @pytest.mark.django_db
-def test_report_import_filter_config_limits_queryset():
+def test_import_definition_filter_config_limits_queryset():
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="A", pages=1)
     b2 = Book.objects.create(title="B", pages=2)
@@ -209,7 +218,7 @@ def test_import_definition_legacy_json_label_still_loads():
 
 
 @pytest.mark.django_db
-def test_report_import_admin_sample_downloads(client):
+def test_import_definition_admin_sample_downloads(client):
     User = get_user_model()
     User.objects.create_superuser("admin", "admin@test.local", "secret")
     ct = ContentType.objects.get_for_model(Book)
@@ -265,6 +274,40 @@ def test_import_data_admin_form_uses_multipart_enctype(client):
     response = client.get(url)
     assert response.status_code == 200
     assert b"multipart/form-data" in response.content
+
+
+@pytest.mark.django_db
+def test_resolve_import_column_paths_accepts_label_subset_like_fixture_csv():
+    """
+    Fewer columns than the full effective set: ``import_book.csv`` uses the same layout
+    as the admin example (row 1 = technical paths, row 2 = human labels, then data).
+    """
+    import pandas as pd
+
+    ct = ContentType.objects.get_for_model(Book)
+    ri = ImportDefinition.objects.create(
+        name="Full paths def",
+        target=ct,
+        columns_exclude=[],
+        filter_config={},
+    )
+    full = effective_import_column_paths(ri)
+    assert len(full) > 7
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "import_book.csv"
+    df = pd.read_csv(fixture)
+    errs, paths = resolve_import_column_paths(ri, df)
+    assert errs == []
+    assert len(paths) == 7
+    assert paths == [
+        "title",
+        "pages",
+        "price",
+        "publication_date",
+        "recorded_at",
+        "author.name",
+        "metadata",
+    ]
 
 
 @pytest.mark.django_db
@@ -395,7 +438,7 @@ def test_create_import_ask_stores_inferred_column_paths():
     )
     from django.core.files.uploadedfile import SimpleUploadedFile
 
-    from django_importexport_flow.utils.import_tabular import create_import_request
+    from django_importexport_flow.engine.core.import_ import create_import_request
 
     f = SimpleUploadedFile("t.csv", b"Book title,Nb. of pages\nx,1\n", content_type="text/csv")
     ask = create_import_request(
@@ -406,3 +449,12 @@ def test_create_import_ask_stores_inferred_column_paths():
         inferred_column_paths=["title", "pages"],
     )
     assert ask.filter_payload[IMPORT_COLUMN_PATHS_KEY] == ["title", "pages"]
+
+
+def test_read_import_bytes_rejects_json():
+    from django_importexport_flow.engine.core.import_ import read_import_bytes
+
+    with pytest.raises(ValueError, match="JSON"):
+        read_import_bytes(b'[{"a": 1}]', "data.json", 1024)
+    with pytest.raises(ValueError, match="JSON"):
+        read_import_bytes(b'[{"a": 1}]', "upload.csv", 1024)

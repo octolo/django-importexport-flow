@@ -1,20 +1,7 @@
-from django.template import Template
+"""PDF export via WeasyPrint (:class:`~django_importexport_flow.engine.core.pdf.PdfEngine`)."""
 
-from .core import CoreEngine
+from __future__ import annotations
 
+from .core.pdf import ExportPdfEngine, PdfEngine
 
-class PdfEngine(CoreEngine):
-    def get_template(self):
-        return self.definition.config_pdf.template
-
-    def get_context(self):
-        return {"object_list": self.get_queryset()}
-
-    def render(self):
-        tpl = Template(self.get_template() or "")
-        return tpl.render(self.get_context())
-
-    def get_report(self):
-        from weasyprint import HTML
-
-        return HTML(string=self.render()).write_pdf()
+__all__ = ["ExportPdfEngine", "PdfEngine"]

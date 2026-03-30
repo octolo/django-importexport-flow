@@ -1,4 +1,7 @@
-"""Shared admin form fields for ``filter_request`` / ``filter_mandatory`` (export + import)."""
+"""Helpers for ``filter_request`` / ``filter_mandatory``: Django form fields, validation, and field order.
+
+The same ``fr_get_*`` / ``fr_kw_*`` key layout applies to any caller (admin form, management command, etc.).
+"""
 
 from __future__ import annotations
 
@@ -31,21 +34,15 @@ def attach_filter_context_fields(
             continue
         in_man = param_name in get_m
         fname = form_field_name_for_query_param(param_name)
-        field_help = (
-            req_label
-            if in_man
-            else _("Optional — leave empty to skip this filter.")
-        )
+        field_help = req_label if in_man else _("Optional — leave empty to skip this filter.")
         form.fields[fname] = forms.CharField(
-            label=_("GET “%(param)s” → %(field)s")
-            % {"param": param_name, "field": orm_field},
+            label=_("GET “%(param)s” → %(field)s") % {"param": param_name, "field": orm_field},
             required=False,
             help_text=field_help,
         )
     for kw_name, orm_field in sorted(kw_map.items()):
         form.fields[form_field_name_for_url_kwarg(kw_name)] = forms.CharField(
-            label=_("URL “%(kw)s” → %(field)s")
-            % {"kw": kw_name, "field": orm_field},
+            label=_("URL “%(kw)s” → %(field)s") % {"kw": kw_name, "field": orm_field},
             required=False,
             help_text=url_req,
         )

@@ -9,14 +9,16 @@ from typing import Any
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from .utils.filter_form import (
+from .engine.core.filters import (
     attach_filter_context_fields,
     clean_filter_context_data,
     reorder_filter_fields_first,
 )
+from .utils.helpers import get_setting
+from .utils.upload_validation import validate_configuration_json_payload
 
-MAX_IMPORT_BYTES = 2 * 1024 * 1024
-MAX_TABULAR_IMPORT_BYTES = 10 * 1024 * 1024
+MAX_IMPORT_BYTES = get_setting("MAX_IMPORT_BYTES")
+MAX_TABULAR_IMPORT_BYTES = get_setting("MAX_TABULAR_IMPORT_BYTES")
 
 # CSV / Excel / JSON — shared by export, example download, and tabular import hints.
 EXPORT_FORMAT_CHOICES = (
@@ -89,11 +91,11 @@ class TabularImportForm(forms.Form):
     import_request_uuid = forms.UUIDField(required=False, widget=forms.HiddenInput)
     file = forms.FileField(
         label=_("Data file"),
-        help_text=_("CSV, Excel (.xlsx), or JSON array of records."),
+        help_text=_("CSV or Excel (.xlsx). Tabular JSON uploads are not supported."),
         required=False,
         widget=forms.ClearableFileInput(
             attrs={
-                "accept": ".csv,.xlsx,.xls,.json,application/json,text/csv,"
+                "accept": ".csv,.xlsx,.xls,text/csv,"
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             }
         ),
@@ -107,6 +109,20 @@ class TabularImportForm(forms.Form):
             return
         attach_filter_context_fields(self, source, for_import=True)
         reorder_filter_fields_first(self, ("step", "import_request_uuid", "file"), ())
+        if get_setting("IMPORT_TASK_BACKEND", "sync") != "sync" and get_setting(
+            "IMPORT_ADMIN_OFFER_ASYNC", True
+        ):
+            self.fields["defer_to_task"] = forms.BooleanField(
+                label=_("Process import in background"),
+                required=False,
+                initial=bool(get_setting("IMPORT_ADMIN_ASYNC_DEFAULT", False)),
+                help_text=_("Uses IMPORT_TASK_BACKEND (thread, Celery, or RQ)."),
+            )
+            reorder_filter_fields_first(
+                self,
+                ("step", "import_request_uuid", "file"),
+                ("defer_to_task",),
+            )
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
@@ -150,6 +166,7 @@ def make_tabular_import_form_class(import_definition: Any):
     )
 
 
+# Backward-compatible names (django-reporting era); prefer Import* / Tabular* symbols.
 ReportImportExampleFileForm = ImportExampleFileForm
 ReportImportDataForm = TabularImportForm
 make_report_import_data_form_class = make_tabular_import_form_class
@@ -162,7 +179,8 @@ class ExportConfigurationImportForm(forms.Form):
         label=_("JSON file"),
         help_text=_(
             "Same format as the export. If a report with the same name already "
-            "exists, it is replaced; otherwise a new report is created."
+            "exists, it is replaced; otherwise a new report is created. "
+            "Only upload files you trust (same privilege as loaddata)."
         ),
         widget=forms.ClearableFileInput(attrs={"accept": "application/json,.json"}),
     )
@@ -180,5 +198,9 @@ class ExportConfigurationImportForm(forms.Form):
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
             raise forms.ValidationError(_("Invalid JSON.")) from exc
+        try:
+            validate_configuration_json_payload(payload)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
         self.import_data = payload
         return f

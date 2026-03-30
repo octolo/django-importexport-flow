@@ -18,4 +18,4 @@ def content_disposition_attachment(filename: str) -> str:
         return f'attachment; filename="{filename}"'
     ascii_fallback = filename.encode("ascii", "replace").decode("ascii").replace("?", "_")
     quoted = quote(filename, safe="")
-    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quoted}'
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quoted}"

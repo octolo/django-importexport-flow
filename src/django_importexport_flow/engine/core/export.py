@@ -1,14 +1,22 @@
-"""Runtime helpers for table exports (filters + request)."""
+"""Table export runtime: filter payload, synthetic request, :func:`run_table_export`."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from django.http import HttpRequest, QueryDict
 
-from ..engine import TableEngine
-from ..models import ExportConfigTable, ExportDefinition
+from ...apps import DjangoImportExportFlowConfig
+from ...models import ExportConfigTable, ExportDefinition
+from .table import TableEngine
 from .validation import parse_filter_maps_from_definition
+
+
+def snapshot_export_filter_payload(cleaned_data: dict[str, Any]) -> dict[str, Any]:
+    """JSON-safe subset for audit storage: ``export_format`` and ``fr_*`` keys only."""
+    subset = {k: v for k, v in cleaned_data.items() if k == "export_format" or k.startswith("fr_")}
+    return json.loads(json.dumps(subset, default=str))
 
 
 class DefinitionFilterProxy:
@@ -43,7 +51,7 @@ def attach_export_url_kwargs(request: HttpRequest, url_kwargs: dict[str, Any]) -
 
 def form_field_name_for_query_param(param_name: str, *args: Any, **kwargs: Any) -> str:
     """
-    Admin export form field name for a GET query param
+    Key for a GET query param in the export filter payload
     (``filter_request`` and/or ``filter_mandatory.get``). Uses the ``fr_get_`` prefix so
     names never collide with :func:`form_field_name_for_url_kwarg` (``fr_kw_``).
     Extra positional/keyword args are ignored (backward compatibility).
@@ -52,28 +60,20 @@ def form_field_name_for_query_param(param_name: str, *args: Any, **kwargs: Any) 
 
 
 def form_field_name_for_url_kwarg(kw_name: str) -> str:
-    """Admin export form field name for ``filter_mandatory.kwargs`` (path parameters)."""
+    """Key in the filter payload for ``filter_mandatory.kwargs`` (path parameters)."""
     return f"fr_kw_{kw_name}"
-
-
-_EXPORT_FORMAT_DISPATCH: dict[str, tuple[str, str, str]] = {
-    "csv": ("get_csv", "text/csv; charset=utf-8", ".csv"),
-    "excel": (
-        "get_excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".xlsx",
-    ),
-    "json": ("get_json_bytes", "application/json; charset=utf-8", ".json"),
-}
 
 
 def run_table_export(
     definition: Any,
-    cleaned_data: dict[str, Any],
+    filter_payload: dict[str, Any],
 ) -> tuple[bytes, str, str]:
     """
     Build queryset from ``filter_request`` / ``filter_mandatory`` (GET + URL kwargs).
     ``filter_config`` is taken from the report only (no export-time override).
+
+    ``filter_payload`` uses the same keys as a validated export form (``export_format``,
+    ``fr_get_*``, ``fr_kw_*``) or any equivalent dict (e.g. from a management command).
 
     Returns ``(body_bytes, content_type, file_extension)`` — e.g. ``(".csv")``.
     The download filename (with timestamp) is set in the admin view.
@@ -83,16 +83,16 @@ def run_table_export(
     get_params: dict[str, str] = {}
     for param_name in all_get_params:
         form_key = form_field_name_for_query_param(param_name)
-        if form_key not in cleaned_data:
-            raise ValueError(f"Missing form field for request param {param_name!r}")
-        get_params[param_name] = str(cleaned_data[form_key])
+        if form_key not in filter_payload:
+            raise ValueError(f"Missing filter payload key for request param {param_name!r}")
+        get_params[param_name] = str(filter_payload[form_key])
 
     url_kw: dict[str, str] = {}
     for kw_name in kw_map:
         fkey = form_field_name_for_url_kwarg(kw_name)
-        if fkey not in cleaned_data:
-            raise ValueError(f"Missing form field for URL kwarg {kw_name!r}")
-        url_kw[kw_name] = str(cleaned_data[fkey])
+        if fkey not in filter_payload:
+            raise ValueError(f"Missing filter payload key for URL kwarg {kw_name!r}")
+        url_kw[kw_name] = str(filter_payload[fkey])
 
     merged = dict(getattr(definition, "filter_config", None) or {})
     proxy = DefinitionFilterProxy(definition, merged)
@@ -100,8 +100,9 @@ def run_table_export(
     attach_export_url_kwargs(request, url_kw)
     engine = TableEngine(proxy, request=request)
 
-    fmt = cleaned_data["export_format"]
-    spec = _EXPORT_FORMAT_DISPATCH.get(fmt)
+    fmt = filter_payload["export_format"]
+    dispatch = DjangoImportExportFlowConfig.export_format_dispatch
+    spec = dispatch.get(fmt)
     if spec is None:
         raise ValueError(f"Unknown export format {fmt!r}")
     method_name, content_type, ext = spec
@@ -109,46 +110,48 @@ def run_table_export(
     return body, content_type, ext
 
 
-def build_http_request_from_filter_form_cleaned(
+def build_http_request_from_filter_payload(
     definition: Any,
-    cleaned_data: dict[str, Any],
+    filter_payload: dict[str, Any],
 ) -> HttpRequest:
-    """Build a GET request + URL kwargs from the same ``cleaned_data`` keys as :func:`run_table_export`."""
+    """Build a GET request + URL kwargs from the same keys as :func:`run_table_export`."""
     fr, _mandatory, get_m, kw_map = parse_filter_maps_from_definition(definition)
     all_get_params = set(fr) | set(get_m)
     get_params: dict[str, str] = {}
     for param_name in all_get_params:
         form_key = form_field_name_for_query_param(param_name)
-        get_params[param_name] = str(cleaned_data.get(form_key, ""))
+        get_params[param_name] = str(filter_payload.get(form_key, ""))
     url_kw: dict[str, str] = {}
     for kw_name in kw_map:
         fkey = form_field_name_for_url_kwarg(kw_name)
-        url_kw[kw_name] = str(cleaned_data.get(fkey, ""))
+        url_kw[kw_name] = str(filter_payload.get(fkey, ""))
     request = build_request_with_get(get_params)
     attach_export_url_kwargs(request, url_kw)
     return request
 
 
-def collect_dynamic_filter_kwargs(definition: Any, cleaned_data: dict[str, Any]) -> dict[str, Any]:
+def collect_dynamic_filter_kwargs(
+    definition: Any, filter_payload: dict[str, Any]
+) -> dict[str, Any]:
     """
     ORM filter kwargs from ``filter_request`` / ``filter_mandatory`` (same rules as
     :class:`~django_importexport_flow.engine.core.CoreEngine` ``_filter_request``).
     """
-    from ..engine.core import CoreEngine
+    from .engine import CoreEngine
 
     merged = dict(getattr(definition, "filter_config", None) or {})
     proxy = DefinitionFilterProxy(definition, merged)
-    request = build_http_request_from_filter_form_cleaned(definition, cleaned_data)
+    request = build_http_request_from_filter_payload(definition, filter_payload)
     return CoreEngine(proxy, request=request)._filter_request()
 
 
 def definition_has_table_config(definition: Any) -> bool:
-    if isinstance(definition, ExportDefinition):
-        try:
-            ct = definition.config_table
-        except ExportConfigTable.DoesNotExist:
-            return False
-        cols = ct.columns or []
-        return len(cols) > 0
-    cols = getattr(definition, "columns", None) or []
+    """True only when ``definition`` is an :class:`~django_importexport_flow.models.ExportDefinition` with a non-empty table column list."""
+    if not isinstance(definition, ExportDefinition):
+        return False
+    try:
+        ct = definition.config_table
+    except ExportConfigTable.DoesNotExist:
+        return False
+    cols = ct.columns or []
     return len(cols) > 0

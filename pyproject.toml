@@ -39,8 +39,10 @@ classifiers = [
 dependencies = [
     "Django>=3.2",
     "django-boosted>=1.0.0",
+    "django-virtualqueryset>=1.0.0",
     "openpyxl>=3.1.5",
     "pandas>=3.0.1",
+    "namedid>=0.2.0",
 ]
 
 [project.urls]
@@ -50,6 +52,7 @@ Documentation = "https://github.com/octolo/django-importexport-flow/blob/main/do
 Issues = "https://github.com/octolo/django-importexport-flow/issues"
 
 [project.optional-dependencies]
+pdf = ["weasyprint>=62.0"]
 dev = [
     "pytest>=8.3",
     "pytest-django>=4.5",
@@ -82,3 +85,6 @@ django_settings_module = "tests.settings"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/sample/report_fixtures/build_fixtures.py" = ["E402"]

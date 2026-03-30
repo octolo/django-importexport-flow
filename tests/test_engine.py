@@ -95,8 +95,7 @@ def test_table_engine_reverse_expand_columns():
     rev_name = next(
         f.get_accessor_name()
         for f in Author._meta.get_fields()
-        if getattr(f, "related_model", None) is Book
-        and getattr(f, "one_to_many", False)
+        if getattr(f, "related_model", None) is Book and getattr(f, "one_to_many", False)
     )
     ct = ContentType.objects.get_for_model(Author)
     a1 = Author.objects.create(name="A1")

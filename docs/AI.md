@@ -8,3 +8,5 @@ Short conventions for this repository (does not override your global Cursor rule
 - **Tests**: run `pytest` from the package root after behavioural changes; tests use `tests.settings` and the sample app under `tests/`.
 
 For architecture and layout, see [structure.md](structure.md) and [filters-and-export.md](filters-and-export.md).
+
+- **Import implementation files** (under `engine/core/`): `paths.py` (field paths / headers), `io.py`, `preview.py`, `items.py`, `run.py`; public re-exports remain on **`import_.py`**.

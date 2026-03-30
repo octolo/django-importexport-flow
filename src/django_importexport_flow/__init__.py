@@ -1,4 +1,10 @@
-"""django-importexport-flow package."""
+"""
+django-importexport-flow package.
+
+``serialize_report_import`` / ``import_report_import`` are aliases of
+``serialize_import_definition`` / ``import_import_definition`` (legacy names).
+See ``docs/purpose.md`` (Legacy naming).
+"""
 
 from importlib.metadata import PackageNotFoundError, version
 
@@ -51,7 +57,7 @@ def __getattr__(name: str):
 
         return import_report_import
     if name == "get_export_definitions":
-        from .utils import get_export_definitions
+        from .utils.helpers import get_export_definitions
 
         return get_export_definitions
     if name == "ExportDefinition":

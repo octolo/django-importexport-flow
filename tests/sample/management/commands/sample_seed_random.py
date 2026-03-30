@@ -103,7 +103,9 @@ class Command(BaseCommand):
 
         if options["clear"]:
             deleted_a, _ = Author.objects.all().delete()
-            self.stdout.write(self.style.WARNING(f"Deleted {deleted_a} author(s) (and related books)."))
+            self.stdout.write(
+                self.style.WARNING(f"Deleted {deleted_a} author(s) (and related books).")
+            )
 
         authors = []
         for _ in range(authors_n):
@@ -136,7 +138,5 @@ class Command(BaseCommand):
             created_books += 1
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Created {len(authors)} author(s) and {created_books} book(s)."
-            )
+            self.style.SUCCESS(f"Created {len(authors)} author(s) and {created_books} book(s).")
         )

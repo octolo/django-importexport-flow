@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.db.models import QuerySet
 from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
 
@@ -15,10 +18,14 @@ class ImportRequest(AuditMixin, models.Model):
     One user upload + filter snapshot for a tabular import. Each confirmation or
     relaunch creates a **new** row so history stays linear; failed rows keep
     ``error_trace`` for support.
+
+    Optional business scope via :class:`~django_importexport_flow.models.ImportRequestRelatedObject`
+    (see admin inlines or :meth:`active_imports_for_object`).
     """
 
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")
+        PROCESSING = "processing", _("Processing")
         SUCCESS = "success", _("Success")
         FAILURE = "failure", _("Failure")
 
@@ -85,6 +92,7 @@ class ImportRequest(AuditMixin, models.Model):
     )
 
     class Meta:
+        # Historical table name (ex django-reporting); do not rename without a migration plan.
         db_table = "django_reporting_reportimportask"
         ordering = ("-created_at",)
         verbose_name = _("Import request")
@@ -92,3 +100,16 @@ class ImportRequest(AuditMixin, models.Model):
 
     def __str__(self) -> str:
         return f"{self.import_definition_id} · {self.get_status_display()} · {self.uuid}"
+
+    @classmethod
+    def active_imports_for_object(cls, obj: Any) -> QuerySet[ImportRequest]:
+        """
+        Import requests still **pending** or **processing** linked to ``obj`` through
+        :class:`~django_importexport_flow.models.ImportRequestRelatedObject`.
+        """
+        ct = ContentType.objects.get_for_model(obj, for_concrete_model=False)
+        return cls.objects.filter(
+            related_object_links__content_type=ct,
+            related_object_links__object_id=str(obj.pk),
+            status__in=(cls.Status.PENDING, cls.Status.PROCESSING),
+        ).distinct()

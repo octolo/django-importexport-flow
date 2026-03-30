@@ -7,8 +7,9 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
+from namedid import NamedIDField
 
-from ..utils.validation import validate_export_column_specs, validate_export_filter_fields
+from ..engine.core.validation import validate_export_column_specs, validate_export_filter_fields
 
 
 class ImportDefinition(AuditMixin, models.Model):
@@ -27,6 +28,10 @@ class ImportDefinition(AuditMixin, models.Model):
         verbose_name=_("UUID"),
     )
     name = models.CharField(max_length=255, verbose_name=_("Name"))
+    named_id = NamedIDField(
+        source_fields=["name"],
+        max_length=255,
+    )
     description = models.TextField(
         blank=True,
         null=True,
@@ -57,9 +62,7 @@ class ImportDefinition(AuditMixin, models.Model):
         blank=True,
         null=True,
         verbose_name=_("Filter configuration"),
-        help_text=_(
-            "Static queryset filters (e.g. tenant or scope). example: {'tenant_id': 1}"
-        ),
+        help_text=_("Static queryset filters (e.g. tenant or scope). example: {'tenant_id': 1}"),
     )
     filter_request = models.JSONField(
         default=dict,
@@ -122,6 +125,7 @@ class ImportDefinition(AuditMixin, models.Model):
     )
 
     class Meta:
+        # Historical table name (ex django-reporting); do not rename without a migration plan.
         db_table = "django_reporting_reportimport"
         ordering = ("name", "target")
         verbose_name = _("Import definition")

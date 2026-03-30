@@ -1,46 +1,30 @@
-{% extends "admin/base_site.html" %}
-{% load i18n admin_urls %}
+{% extends "admin_boost/change_list.html" %}
+{% load i18n admin_urls static %}
 
-{% block breadcrumbs %}
-<div class="breadcrumbs">
-  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
-  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
-  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
-  &rsaquo; <a href="{% url opts|admin_urlname:'change' original.pk|admin_urlquote %}">{{ original|truncatewords:"18" }}</a>
-  &rsaquo; {{ title }}
-</div>
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/css/forms.css' %}">
 {% endblock %}
 
+{% block coltype %}colM{% endblock %}
+
+{% block bodyclass %}{{ block.super }} change-form{% endblock %}
+
 {% block content %}
-<h1>{{ title }}</h1>
 <p class="help">{% trans "First rows from your file. Submit to create records on the target model." %}</p>
-<div style="overflow-x: auto;">
-  <table class="listing">
-    <thead>
-      <tr>
-        {% for col in preview_columns %}
-        <th>{{ col }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in preview_rows %}
-      <tr class="{% cycle 'row1' 'row2' %}">
-        {% for cell in row %}
-        <td>{{ cell }}</td>
-        {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-<form method="post" action="{{ request.path }}">
+{{ block.super }}
+<form method="post" action="{{ import_data_post_url }}" id="import_confirm_form" novalidate>
   {% csrf_token %}
   <input type="hidden" name="step" value="confirm" />
   <input type="hidden" name="import_request_uuid" value="{{ import_request_uuid }}" />
+  {% if form.defer_to_task %}
+  <p class="aligned">
+    <label for="id_defer_to_task">{{ form.defer_to_task }} {{ form.defer_to_task.label }}</label>
+    {% if form.defer_to_task.help_text %}<span class="help">{{ form.defer_to_task.help_text }}</span>{% endif %}
+  </p>
+  {% endif %}
   <div class="submit-row">
-    <input type="submit" class="default" value="{% trans 'Confirm import' %}" />
+    <input type="submit" class="default" name="_confirm" value="{% trans 'Confirm import' %}" />
+    <a href="{% url opts|admin_urlname:'change' original.pk|admin_urlquote %}" class="deletelink" role="button">{% trans "Cancel" %}</a>
   </div>
 </form>
-<p><a href="{% url opts|admin_urlname:'change' original.pk|admin_urlquote %}">{% trans "Cancel" %}</a></p>
 {% endblock %}

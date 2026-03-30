@@ -2,7 +2,10 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 
 from django_importexport_flow.engine import ExportTableEngine
-from django_importexport_flow.utils.export import attach_export_url_kwargs, build_request_with_get
+from django_importexport_flow.engine.core.export import (
+    attach_export_url_kwargs,
+    build_request_with_get,
+)
 from django_importexport_flow.models import ExportConfigTable, ExportDefinition
 from tests.sample.models import Book
 

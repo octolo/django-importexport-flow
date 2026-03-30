@@ -1,4 +1,4 @@
-"""ORM/path helpers (column labels, relation accessors, JSON paths, export helpers)."""
+"""ORM/path helpers (column labels, relation accessors, JSON paths, export/download filenames)."""
 
 from __future__ import annotations
 
@@ -26,6 +26,10 @@ __all__ = [
     "resolve_expand_relation",
     "resolve_table_column_label",
     "verbose_name_for_field_path",
+    "get_setting",
+    "safe_download_stem",
+    "export_timestamp_for_filename",
+    "dated_export_filename",
 ]
 
 # ``book_set.*[title:pages]`` — reverse manager, repeated columns per related row
@@ -33,9 +37,7 @@ REVERSE_EXPAND_PATTERN = re.compile(
     r"^([a-zA-Z_][a-zA-Z0-9_]*)\.\*\[(.+)\]\s*$",
 )
 # ``tags.0.name`` / ``tags.0.category.name`` — slot index + path on the related model
-M2M_SLOT_PATH_PATTERN = re.compile(
-    r"^([a-zA-Z_][a-zA-Z0-9_]*)\.(\d+)\.(.+)$"
-)
+M2M_SLOT_PATH_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)\.(\d+)\.(.+)$")
 
 
 def _get_path_segment(current: Any, part: str) -> Any:
@@ -129,7 +131,7 @@ def label_for_slot_path(model: type[models.Model], path: str) -> str | None:
     vn = verbose_name_for_field_path(rm, sub)
     if vn is None:
         return None
-    return f"{vn} {int(slot_s)+1}"
+    return f"{vn} {int(slot_s) + 1}"
 
 
 def label_for_m2m_slot_path(model: type[models.Model], path: str) -> str | None:
@@ -220,9 +222,7 @@ def get_related_model_for_accessor(
         )
     related = getattr(field, "related_model", None)
     if related is None:
-        raise ValueError(
-            f"Field {relation_name!r} on {model.__name__} has no related_model."
-        )
+        raise ValueError(f"Field {relation_name!r} on {model.__name__} has no related_model.")
     return related
 
 
@@ -237,9 +237,7 @@ def resolve_expand_relation(
     """
     field = _field_by_meta_or_accessor(model, user_name)
     if field is None:
-        raise FieldDoesNotExist(
-            f"{model.__name__} has no field or reverse accessor {user_name!r}."
-        )
+        raise FieldDoesNotExist(f"{model.__name__} has no field or reverse accessor {user_name!r}.")
     if not getattr(field, "one_to_many", False):
         raise ValueError(
             f"{user_name!r} must be a reverse relation (one-to-many), "
@@ -252,35 +250,51 @@ def resolve_expand_relation(
     return related, accessor
 
 
-def _related_size(rel: Any) -> int:
-    if rel is None:
-        return 0
-    if hasattr(rel, "all"):
-        return len(rel.all())
-    return 1
+def _orm_count_lookup_for_reverse_accessor(model: type[models.Model], accessor: str) -> str:
+    """
+    Map reverse manager name (e.g. ``book_set`` for ``getattr`` / ``prefetch_related``) to the
+    related object's :class:`~django.db.models.ManyToOneRel` ``name`` used by ``Count()`` (often
+    the related model's ``model_name``).
+    """
+    for f in model._meta.get_fields():
+        if getattr(f, "one_to_many", False) and f.get_accessor_name() == accessor:
+            return f.name
+    return accessor
 
 
 def max_relation_count(queryset: models.QuerySet, relation_name: str) -> int:
     """Maximum number of related objects for ``relation_name`` across the queryset."""
-    max_n = 0
-    for obj in queryset:
-        rel = getattr(obj, relation_name, None)
-        max_n = max(max_n, _related_size(rel))
-    return max_n
+    from django.db.models import Count, Max
+
+    lookup = _orm_count_lookup_for_reverse_accessor(queryset.model, relation_name)
+    key = "_djief_rc_0"
+    row = queryset.annotate(**{key: Count(lookup)}).aggregate(m=Max(key))
+    v = row.get("m")
+    return int(v) if v is not None else 0
 
 
-def max_relation_counts(
-    queryset: models.QuerySet, relation_names: list[str]
-) -> dict[str, int]:
-    """Single pass: max related count per accessor name."""
+def max_relation_counts(queryset: models.QuerySet, relation_names: list[str]) -> dict[str, int]:
+    """
+    Max related-object count per reverse accessor (e.g. ``book_set``), across ``queryset``.
+
+    Uses ``Count`` / ``Max`` on the queryset instead of loading related rows per parent row.
+    """
+    from django.db.models import Count, Max
+
     counts = {r: 0 for r in relation_names}
     if not relation_names:
         return counts
-    for obj in queryset.iterator(chunk_size=200):
-        for r in relation_names:
-            rel = getattr(obj, r, None)
-            counts[r] = max(counts[r], _related_size(rel))
-    return counts
+    model = queryset.model
+    unique = list(dict.fromkeys(relation_names))
+    lookups = [_orm_count_lookup_for_reverse_accessor(model, rel) for rel in unique]
+    ann = {f"_djief_rc_{i}": Count(lookup) for i, lookup in enumerate(lookups)}
+    agg = {f"_djief_mx_{i}": Max(f"_djief_rc_{i}") for i in range(len(unique))}
+    row = queryset.annotate(**ann).aggregate(**agg)
+    max_by_rel: dict[str, int] = {}
+    for i, rel in enumerate(unique):
+        v = row.get(f"_djief_mx_{i}")
+        max_by_rel[rel] = int(v) if v is not None else 0
+    return {r: max_by_rel.get(r, 0) for r in relation_names}
 
 
 def get_expanded_related_value(
@@ -330,6 +344,7 @@ def dataframe_preview_table(df: Any, *, limit: int = 30) -> tuple[list[str], lis
         raise TypeError(
             f"dataframe_preview_table expects pandas.DataFrame, got {type(df).__name__!r}."
         )
+
     def _preview_scalar(v: Any) -> Any:
         if pd.isna(v):
             return ""
@@ -353,3 +368,55 @@ def dataframe_preview_table(df: Any, *, limit: int = 30) -> tuple[list[str], lis
             r.append(_preview_scalar(row[c]))
         rows_out.append(r)
     return cols, rows_out
+
+
+def safe_download_stem(
+    raw_name: str | None,
+    *,
+    fallback: str = "export",
+    max_len: int = 80,
+) -> str:
+    """Sanitize a title or name for use as a download filename stem (no extension)."""
+    base = re.sub(r"[^\w\-.]+", "_", raw_name or "").strip("_") or fallback
+    return base[:max_len]
+
+
+def export_timestamp_for_filename() -> str:
+    """Local time, second precision, safe for filenames (e.g. ``20260329_143045``)."""
+    from django.utils import timezone
+
+    return timezone.localtime(timezone.now()).strftime("%Y%m%d_%H%M%S")
+
+
+def dated_export_filename(safe_stem: str, ext: str) -> str:
+    """
+    ``safe_stem`` = basename without extension (already sanitized).
+    ``ext`` must include the leading dot (e.g. ``.csv``).
+    """
+    return f"{safe_stem}_{export_timestamp_for_filename()}{ext}"
+
+
+def get_setting(name: str, default: Any | None = None) -> Any:
+    """
+    Return a package setting: defaults from
+    :attr:`django_importexport_flow.apps.DjangoImportExportFlowConfig.default_settings`,
+    then optional Django overrides (``DJANGO_IMPORTEXPORT_FLOW`` dict or
+    ``DJANGO_IMPORTEXPORT_FLOW_<NAME>``).
+    """
+    from django.conf import settings
+
+    from ..apps import DjangoImportExportFlowConfig
+
+    pkg_defaults = DjangoImportExportFlowConfig.default_settings
+    if name not in pkg_defaults and default is None:
+        raise KeyError(f"Unknown django-importexport-flow setting: {name!r}")
+    fallback = pkg_defaults[name] if name in pkg_defaults else default
+    if not settings.configured:
+        return fallback
+    flow = getattr(settings, "DJANGO_IMPORTEXPORT_FLOW", None)
+    if isinstance(flow, dict) and name in flow:
+        return flow[name]
+    env_key = f"DJANGO_IMPORTEXPORT_FLOW_{name.upper()}"
+    if hasattr(settings, env_key):
+        return getattr(settings, env_key)
+    return fallback

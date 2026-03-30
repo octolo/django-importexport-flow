@@ -17,6 +17,14 @@ Editable install for development:
 pip install -e ".[dev]"
 ```
 
+PDF export requires **WeasyPrint**. The package exposes an optional extra:
+
+```bash
+pip install "django-importexport-flow[pdf]"
+```
+
+(`[dev]` already includes `weasyprint` for running PDF-related tests locally.)
+
 ## Django settings
 
 Register apps **after** `django.contrib.contenttypes`:

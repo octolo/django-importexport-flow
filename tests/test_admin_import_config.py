@@ -41,9 +41,7 @@ def test_run_json_configuration_import_success(request_obj, form_obj) -> None:
 
 
 @patch("django_importexport_flow.admin.import_config.messages")
-def test_run_json_configuration_import_value_error(
-    mock_messages, request_obj, form_obj
-) -> None:
+def test_run_json_configuration_import_value_error(mock_messages, request_obj, form_obj) -> None:
     def importer(data: dict) -> None:
         raise ValueError("bad payload")
 

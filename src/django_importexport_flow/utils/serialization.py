@@ -12,8 +12,9 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
 from ..models import ExportConfigPdf, ExportConfigTable, ExportDefinition, ImportDefinition
+from .helpers import get_setting
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = get_setting("SERIALIZATION_FORMAT_VERSION")
 
 _EXPORT_DEFINITION_MODEL = "django_importexport_flow.exportdefinition"
 _IMPORT_DEFINITION_MODEL = "django_importexport_flow.importdefinition"
@@ -278,7 +279,9 @@ def import_export_configuration(data: dict[str, Any]) -> ExportDefinition:
     serialization format.
     """
     if data.get("format_version") != FORMAT_VERSION:
-        raise ValueError(_("Unsupported format_version (expected %(exp)s).") % {"exp": FORMAT_VERSION})
+        raise ValueError(
+            _("Unsupported format_version (expected %(exp)s).") % {"exp": FORMAT_VERSION}
+        )
     objects = data.get("objects")
     if not isinstance(objects, list):
         raise ValueError(_("Invalid payload: 'objects' must be a list."))
@@ -291,9 +294,7 @@ def import_export_configuration(data: dict[str, Any]) -> ExportDefinition:
     _normalize_legacy_export_definition_integer_pks(objects)
     incoming_name = _export_definition_name_from_payload(objects)
     if incoming_name:
-        existing = (
-            ExportDefinition.objects.filter(name=incoming_name).order_by("pk").first()
-        )
+        existing = ExportDefinition.objects.filter(name=incoming_name).order_by("pk").first()
         if existing is not None:
             _rewrite_import_payload_to_target(objects, existing)
     raw = json.dumps(objects)
@@ -329,7 +330,9 @@ def import_import_definition(data: dict[str, Any]) -> ImportDefinition:
     are accepted.
     """
     if data.get("format_version") != FORMAT_VERSION:
-        raise ValueError(_("Unsupported format_version (expected %(exp)s).") % {"exp": FORMAT_VERSION})
+        raise ValueError(
+            _("Unsupported format_version (expected %(exp)s).") % {"exp": FORMAT_VERSION}
+        )
     objects = data.get("objects")
     if not isinstance(objects, list):
         raise ValueError(_("Invalid payload: 'objects' must be a list."))
@@ -357,5 +360,6 @@ def import_import_definition(data: dict[str, Any]) -> ImportDefinition:
     return import_definition
 
 
+# Legacy public names (django-reporting); prefer serialize_import_definition / import_import_definition.
 serialize_report_import = serialize_import_definition
 import_report_import = import_import_definition

@@ -46,9 +46,7 @@ def test_sample_fixtures_import_roundtrip():
 
     for name in ("report_export_books.json", "report_export_authors.json"):
         data = _load(name)
-        ExportDefinition.objects.filter(
-            name__startswith="Sample fixture —"
-        ).delete()
+        ExportDefinition.objects.filter(name__startswith="Sample fixture —").delete()
         obj = import_export_configuration(data)
         assert obj.name.startswith("Sample fixture —")
         ExportDefinition.objects.filter(pk=obj.pk).delete()

@@ -7,9 +7,9 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
-
+from namedid import NamedIDField
 from ..managers import ExportManager
-from ..utils.validation import resolve_manager_to_queryset, validate_export_filter_fields
+from ..engine.core.validation import resolve_manager_to_queryset, validate_export_filter_fields
 
 
 class ExportDefinition(AuditMixin, models.Model):
@@ -20,6 +20,10 @@ class ExportDefinition(AuditMixin, models.Model):
         verbose_name=_("UUID"),
     )
     name = models.CharField(max_length=255, verbose_name=_("Name"))
+    named_id = NamedIDField(
+        source_fields=["name"],
+        max_length=255,
+    )
     description = models.TextField(
         blank=True,
         null=True,
@@ -77,7 +81,7 @@ class ExportDefinition(AuditMixin, models.Model):
         verbose_name=_("Mandatory filters"),
         help_text=_(
             'Either shorthand GET-only mapping, e.g. {"author_id": "author__id"}, or an '
-            'object with “get” and/or “kwargs”: query param names or URL path names → '
+            "object with “get” and/or “kwargs”: query param names or URL path names → "
             "ORM filter keys. All listed values must be present (request.GET and url "
             'kwargs). Example: {"kwargs": {"group_id": "group_id"}} for …/group/<group_id>/'
         ),

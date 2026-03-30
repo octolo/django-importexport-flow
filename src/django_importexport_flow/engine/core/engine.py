@@ -2,7 +2,7 @@ from typing import Any
 
 from django.http import HttpRequest
 
-from ..utils.validation import (
+from .validation import (
     coerce_request_filter_value,
     resolve_manager_to_queryset,
     split_filter_mandatory,

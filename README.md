@@ -1,6 +1,6 @@
 # django-importexport-flow
 
-Declarative reporting for Django: **target model** (`ContentType`), **manager** path, **`filter_config` / `filter_request` / `filter_mandatory`**, **`order_by`**, and **columns** on **`ExportConfigTable`**. Optional **PDF** (`ExportConfigPdf`) and **CSV / XLSX / JSON** export from the admin.
+Declarative **export** and **import** for Django: **`ExportDefinition`** (`ContentType`, manager, filters, **`ExportConfigTable`** columns, optional **`ExportConfigPdf`**); **`ImportDefinition`** with a tabular import wizard and **`ImportRequest`** audit. Admin **CSV / XLSX / JSON** table export.
 
 **Documentation:** [docs/README.md](docs/README.md)
 
@@ -31,6 +31,7 @@ python manage.py migrate django_importexport_flow
 | Purpose | [docs/purpose.md](docs/purpose.md) |
 | Repository layout | [docs/structure.md](docs/structure.md) |
 | Filters & admin export | [docs/filters-and-export.md](docs/filters-and-export.md) |
+| Import wizard | [docs/import-data.md](docs/import-data.md) |
 | Development | [docs/development.md](docs/development.md) |
 | AI / tooling notes | [docs/AI.md](docs/AI.md) |
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from ..utils.validation import validate_export_column_specs
+from ..engine.core.validation import validate_export_column_specs
 from .export_definition import ExportDefinition
 
 

@@ -3,7 +3,7 @@ import json
 import pytest
 from django.contrib.contenttypes.models import ContentType
 
-from django_importexport_flow.utils.export import DefinitionFilterProxy, run_table_export
+from django_importexport_flow.engine.core.export import DefinitionFilterProxy, run_table_export
 from django_importexport_flow.forms import make_export_form_class
 from django_importexport_flow.models import ExportConfigTable, ExportDefinition
 from tests.sample.models import Book

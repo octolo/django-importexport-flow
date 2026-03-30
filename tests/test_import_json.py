@@ -11,7 +11,10 @@ from django_importexport_flow.models import (
     ExportConfigTable,
     ExportDefinition,
 )
-from django_importexport_flow.utils.serialization import import_export_configuration, serialize_export_configuration
+from django_importexport_flow.utils.serialization import (
+    import_export_configuration,
+    serialize_export_configuration,
+)
 from tests.sample.models import Book
 
 
@@ -55,9 +58,7 @@ def test_import_export_configuration_replaces_when_name_exists():
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(
-        export=source, template="<p>s</p>", configuration={"k": 1}
-    )
+    ExportConfigPdf.objects.create(export=source, template="<p>s</p>", configuration={"k": 1})
     payload = serialize_export_configuration(source)
     source.delete()
     existing = ExportDefinition.objects.create(
