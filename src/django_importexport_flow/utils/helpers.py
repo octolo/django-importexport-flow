@@ -24,6 +24,7 @@ __all__ = [
     "normalize_table_column",
     "parse_reverse_expand_spec",
     "resolve_expand_relation",
+    "column_label_override_from_configuration",
     "resolve_table_column_label",
     "verbose_name_for_field_path",
     "get_setting",
@@ -184,14 +185,44 @@ def normalize_table_column(column: str) -> str:
     return spec
 
 
-def resolve_table_column_label(model: type[models.Model], data_path: str) -> str:
-    """Verbose name from meta when possible, else the path string."""
+def column_label_override_from_configuration(
+    configuration: dict[str, Any] | None,
+    field_key: str,
+) -> str | None:
+    """
+    Human label from :class:`~django_importexport_flow.models.ExportConfigTable`
+    ``configuration``: entry ``f\"{field_key}_label\"`` (non-empty string), e.g.
+    ``my_ann_field_label`` for column path ``my_ann_field``.
+    """
+    if not isinstance(configuration, dict) or not field_key:
+        return None
+    raw = configuration.get(f"{field_key}_label")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s if s else None
+
+
+def resolve_table_column_label(
+    model: type[models.Model],
+    data_path: str,
+    *,
+    configuration: dict[str, Any] | None = None,
+) -> str:
+    """
+    Verbose name from model meta when possible; if missing or blank,
+    ``configuration[``f\"{data_path}_label\"``]`` when ``configuration`` is the
+    export table config dict; else ``data_path``.
+    """
     slot = label_for_slot_path(model, data_path)
     if slot is not None:
         return slot
     vn = verbose_name_for_field_path(model, data_path)
-    if vn is not None:
-        return vn
+    if vn is not None and str(vn).strip():
+        return str(vn).strip()
+    override = column_label_override_from_configuration(configuration, data_path)
+    if override is not None:
+        return override
     return data_path
 
 

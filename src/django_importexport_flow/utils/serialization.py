@@ -110,6 +110,16 @@ def _normalize_legacy_export_json_fk_fields(objects: list[dict[str, Any]]) -> No
             fields["export"] = fields.pop("report")
 
 
+def _normalize_export_definition_annotation_columns(objects: list[dict[str, Any]]) -> None:
+    """JSON imports without ``annotation_columns`` (field added in 0004)."""
+    for o in objects:
+        if o.get("model") != _EXPORT_DEFINITION_MODEL:
+            continue
+        fields = o.get("fields")
+        if isinstance(fields, dict) and "annotation_columns" not in fields:
+            fields.setdefault("annotation_columns", [])
+
+
 def _export_definition_name_from_payload(objects: list[dict[str, Any]]) -> str | None:
     for o in objects:
         if o.get("model") != _EXPORT_DEFINITION_MODEL:
@@ -152,6 +162,8 @@ def _normalize_legacy_import_definition_columns_field(objects: list[dict[str, An
             fields.setdefault("columns_exclude", [])
         if "exclude_primary_key" not in fields:
             fields.setdefault("exclude_primary_key", True)
+        if "import_match_fields" not in fields:
+            fields.setdefault("import_match_fields", [])
 
 
 def _normalize_legacy_import_definition_integer_pk(objects: list[dict[str, Any]]) -> None:
@@ -292,6 +304,7 @@ def import_export_configuration(data: dict[str, Any]) -> ExportDefinition:
     _normalize_legacy_django_importexport_app_labels(objects)
     _normalize_legacy_export_json_fk_fields(objects)
     _normalize_legacy_export_definition_integer_pks(objects)
+    _normalize_export_definition_annotation_columns(objects)
     incoming_name = _export_definition_name_from_payload(objects)
     if incoming_name:
         existing = ExportDefinition.objects.filter(name=incoming_name).order_by("pk").first()

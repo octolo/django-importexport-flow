@@ -3,7 +3,6 @@ from __future__ import annotations
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from ..engine.core.validation import validate_export_column_specs
 from .export_definition import ExportDefinition
 
 
@@ -21,8 +20,12 @@ class ExportConfigTable(models.Model):
         null=True,
         verbose_name=_("Columns"),
         help_text=_(
-            "List of strings: each is a field path (e.g. author.name) or an "
-            "expand spec: relation.*[field1:field2] for one-to-many relations."
+            "List of strings: each is a field path (e.g. author.name), keys inside "
+            "a ``JSONField`` (e.g. metadata.lang), an ``@property`` / ``cached_property`` "
+            "on the model or a related model (e.g. author.name_upper), an expand spec: "
+            "relation.*[field1:field2] for one-to-many relations, or a queryset annotation "
+            "name listed on the export (``annotation_columns``) and/or in this "
+            "configuration (``annotation_columns``, ``annotations``)."
         ),
     )
     configuration = models.JSONField(
@@ -32,7 +35,14 @@ class ExportConfigTable(models.Model):
         verbose_name=_("Configuration"),
         help_text=_(
             "Export options passed to pandas: keys ``csv``, ``excel``, ``json`` "
-            "(see DataFrame.to_csv, to_excel, to_json). Default JSON uses orient=records."
+            "(see DataFrame.to_csv, to_excel, to_json). Default JSON uses orient=records. "
+            "Optional ``annotation_columns``: list of names added only by "
+            "``QuerySet.annotate()`` (not ORM fields, JSON subpaths, or properties) so "
+            "they may appear in ``columns``. For any column path in ``columns`` with no "
+            "ORM verbose name (annotations, unknown paths, …), you may set "
+            "``<path>_label`` to the header text, e.g. "
+            "``author.total_books_label`` for path ``author.total_books``; for expand "
+            "subfields, use ``<subfield>_label`` (e.g. ``pages_label``)."
         ),
     )
 
@@ -46,16 +56,6 @@ class ExportConfigTable(models.Model):
 
     def clean(self) -> None:
         super().clean()
-        cols = self.columns or []
-        if not cols:
-            return
-        export = getattr(self, "export", None)
-        if export is None or export.target_id is None:
-            return
-        model = export.target.model_class()
-        if model is None:
-            return
-        validate_export_column_specs(model, cols)
 
     def save(self, *args, **kwargs) -> None:
         self.full_clean()

@@ -1,5 +1,7 @@
 import json
+from io import BytesIO
 
+import openpyxl
 import pytest
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
@@ -37,6 +39,29 @@ def test_table_engine_rows_and_headers():
     assert list(engine.get_queryset()) == [book]
     assert engine.config is not None
     assert engine.get_configuration()["csv"]["delimiter"] == ";"
+
+
+@pytest.mark.django_db
+def test_table_engine_excel_column_count_matches_headers():
+    ct = ContentType.objects.get_for_model(Book)
+    Book.objects.create(title="Guide", pages=42)
+    definition = ExportDefinition.objects.create(
+        name="Books xlsx",
+        target=ct,
+        manager="objects",
+        filter_config={},
+    )
+    ExportConfigTable.objects.create(
+        export=definition,
+        columns=["title", "pages", "metadata"],
+        configuration={"excel": {"sheet": "Data"}},
+    )
+    engine = ExportTableEngine(definition)
+    headers = engine.get_headers()
+    wb = openpyxl.load_workbook(BytesIO(engine.get_excel()))
+    ws = wb.active
+    assert ws.max_column == len(headers)
+    assert ws.max_row == 2
 
 
 @pytest.mark.django_db
@@ -179,10 +204,10 @@ def test_table_engine_jsonfield_whole_dict_nested_and_list():
 
 
 @pytest.mark.django_db
-def test_table_engine_rejects_non_string_column():
+def test_table_engine_non_string_column_does_not_crash():
     ct = ContentType.objects.get_for_model(Book)
     definition = ExportDefinition.objects.create(
-        name="Bad columns",
+        name="Legacy column entry",
         target=ct,
         manager="objects",
         filter_config={},
@@ -196,8 +221,11 @@ def test_table_engine_rejects_non_string_column():
     ExportConfigTable.objects.filter(pk=cfg.pk).update(columns=[{"data": "title"}])
     definition.refresh_from_db()
     engine = ExportTableEngine(definition)
-    with pytest.raises(TypeError, match="str"):
-        engine.get_headers()
+    assert len(engine.get_headers()) == 1
+    Book.objects.create(title="T", pages=1)
+    rows = engine.get_rows()
+    assert len(rows) == 1
+    assert rows[0][0] in ("", None)
 
 
 @pytest.mark.django_db

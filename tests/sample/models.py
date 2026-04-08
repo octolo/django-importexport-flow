@@ -14,6 +14,11 @@ from django.utils.translation import gettext_lazy as _
 class Author(models.Model):
     name = models.CharField(_("Author name"), max_length=100)
 
+    @property
+    def name_upper(self) -> str:
+        """Sample non-field path for export column validation tests."""
+        return self.name.upper()
+
 
 class AuthorProfile(models.Model):
     """Demonstrates ``OneToOneField`` (profile pattern)."""

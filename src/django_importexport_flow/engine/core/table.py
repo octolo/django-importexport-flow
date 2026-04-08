@@ -6,6 +6,7 @@ import pandas as pd
 
 from ...models import ImportDefinition, ExportConfigTable
 from ...utils.helpers import (
+    column_label_override_from_configuration,
     get_expanded_related_value,
     get_value_from_path,
     max_relation_counts,
@@ -51,12 +52,20 @@ class TableEngine(CoreEngine):
         model = self.get_model()
         pieces: list[tuple[Any, ...]] = []
         for col in raw:
-            spec = normalize_table_column(col)
+            try:
+                spec = normalize_table_column(col)
+            except (TypeError, ValueError):
+                spec = str(col).strip() if col is not None else ""
+            if not spec:
+                continue
             parsed = parse_reverse_expand_spec(spec)
             if parsed:
                 rel, subfields = parsed
-                related_model, py_accessor = resolve_expand_relation(model, rel)
-                pieces.append(("expand", py_accessor, subfields, related_model))
+                try:
+                    related_model, py_accessor = resolve_expand_relation(model, rel)
+                    pieces.append(("expand", py_accessor, subfields, related_model))
+                except Exception:
+                    pieces.append(("scalar", spec))
             else:
                 pieces.append(("scalar", spec))
         return pieces
@@ -67,30 +76,43 @@ class TableEngine(CoreEngine):
         expand_rels = [p[1] for p in pieces if p[0] == "expand"]
         self._expand_prefetch_relations = expand_rels
 
+        cfg = self.get_configuration() or {}
         flat: list[dict[str, Any]] = []
         if not expand_rels:
             for p in pieces:
                 data = p[1]
-                label = resolve_table_column_label(model, data)
+                try:
+                    label = resolve_table_column_label(model, data, configuration=cfg)
+                except Exception:
+                    label = str(data)
                 flat.append({"kind": "scalar", "data": data, "label": label})
             return flat
 
         qs = self.get_queryset()
         if expand_rels:
             qs = qs.prefetch_related(*expand_rels)
-        counts = max_relation_counts(qs, expand_rels)
+        try:
+            counts = max_relation_counts(qs, expand_rels)
+        except Exception:
+            counts = {r: 0 for r in expand_rels}
 
         for p in pieces:
             if p[0] == "scalar":
                 data = p[1]
-                label = resolve_table_column_label(model, data)
+                try:
+                    label = resolve_table_column_label(model, data, configuration=cfg)
+                except Exception:
+                    label = str(data)
                 flat.append({"kind": "scalar", "data": data, "label": label})
             else:
                 py_accessor, subfields, related_model = p[1], p[2], p[3]
                 n_slots = counts.get(py_accessor, 0)
                 for slot in range(n_slots):
                     for sf in subfields:
-                        vn = verbose_name_for_field_path(related_model, sf) or sf
+                        vn = verbose_name_for_field_path(related_model, sf)
+                        if vn is None or not str(vn).strip():
+                            vn = column_label_override_from_configuration(cfg, sf)
+                        vn = (str(vn).strip() if vn is not None else "") or sf
                         label = f"{vn} {slot + 1}"
                         flat.append(
                             {
@@ -116,18 +138,28 @@ class TableEngine(CoreEngine):
 
     @classmethod
     def _cell_value(cls, obj: Any, col: dict[str, Any]) -> Any:
-        if col["kind"] == "scalar":
-            raw = get_value_from_path(obj, col["data"])
+        try:
+            if col["kind"] == "scalar":
+                raw = get_value_from_path(obj, col["data"])
+                return _format_cell_export_value(raw)
+            raw = get_expanded_related_value(
+                obj, col["relation"], col["slot"], col["field"]
+            )
             return _format_cell_export_value(raw)
-        raw = get_expanded_related_value(obj, col["relation"], col["slot"], col["field"])
-        return _format_cell_export_value(raw)
+        except Exception:
+            return ""
 
     @classmethod
     def _cell_value_native(cls, obj: Any, col: dict[str, Any]) -> Any:
         """Raw values for pandas (dict/list preserved for ``to_json``)."""
-        if col["kind"] == "scalar":
-            return get_value_from_path(obj, col["data"])
-        return get_expanded_related_value(obj, col["relation"], col["slot"], col["field"])
+        try:
+            if col["kind"] == "scalar":
+                return get_value_from_path(obj, col["data"])
+            return get_expanded_related_value(
+                obj, col["relation"], col["slot"], col["field"]
+            )
+        except Exception:
+            return None
 
     def get_columns(self):
         if not self.config:
@@ -159,7 +191,12 @@ class TableEngine(CoreEngine):
         return [[self._cell_value(obj, c) for c in cols] for obj in self._queryset_for_table()]
 
     def get_dataframe(self) -> pd.DataFrame:
-        """Rows as a DataFrame with verbose column labels and native cell values."""
+        """
+        DataFrame for JSON output: verbose column labels and **native** cell values
+        (``dict`` / ``list`` preserved for :meth:`get_json` / :meth:`get_json_payload`).
+        For CSV and Excel, :meth:`_tabular_export_dataframe` uses :meth:`get_rows`
+        so those formats stay aligned with the same formatting as human-facing cells.
+        """
         if not self.config:
             return pd.DataFrame()
         cols = self._get_flat_columns()
@@ -168,6 +205,16 @@ class TableEngine(CoreEngine):
             [self._cell_value_native(obj, c) for c in cols] for obj in self._queryset_for_table()
         ]
         return pd.DataFrame.from_records(records, columns=headers)
+
+    def _tabular_export_dataframe(self) -> pd.DataFrame:
+        """Rectangular DataFrame for CSV/Excel: same values as :meth:`get_rows` / :meth:`get_headers`."""
+        if not self.config:
+            return pd.DataFrame()
+        headers = self.get_headers()
+        if not headers:
+            return pd.DataFrame()
+        rows = self.get_rows()
+        return pd.DataFrame(rows, columns=headers)
 
     def get_configuration(self):
         if not self.config:
@@ -203,7 +250,7 @@ class TableEngine(CoreEngine):
         if not isinstance(sep, str) or len(sep) != 1:
             sep = ","
         buffer = StringIO()
-        self.get_dataframe().to_csv(buffer, index=False, sep=sep, **csv_opts)
+        self._tabular_export_dataframe().to_csv(buffer, index=False, sep=sep, **csv_opts)
         return buffer.getvalue().encode("utf-8")
 
     def get_excel(self) -> bytes:
@@ -212,7 +259,7 @@ class TableEngine(CoreEngine):
         excel_opts = (cfg.get("excel") or {}).copy()
         sheet_name = excel_opts.pop("sheet", excel_opts.pop("sheet_name", "Sheet1"))
         buffer = BytesIO()
-        self.get_dataframe().to_excel(
+        self._tabular_export_dataframe().to_excel(
             buffer,
             index=False,
             sheet_name=sheet_name,

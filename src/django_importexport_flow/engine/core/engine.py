@@ -3,11 +3,12 @@ from typing import Any
 from django.http import HttpRequest
 
 from .validation import (
+    annotation_aliases_for_definition,
     coerce_request_filter_value,
     resolve_manager_to_queryset,
     split_filter_mandatory,
-    validate_filter_kwargs_for_model,
     validate_export_filter_fields,
+    validate_filter_kwargs_for_model,
 )
 
 
@@ -55,18 +56,22 @@ class CoreEngine:
         # Same rules as ExportDefinition / ImportDefinition clean(): reject bad ORM keys,
         # order_by, and manager path before building SQL (also safe if engine is used
         # without going through model.save()).
+        ann_aliases = annotation_aliases_for_definition(self.definition)
         validate_export_filter_fields(
             model_cls,
             getattr(self.definition, "filter_config", None) or {},
             getattr(self.definition, "filter_request", None) or {},
             getattr(self.definition, "filter_mandatory", None) or {},
             getattr(self.definition, "order_by", None) or [],
+            annotation_aliases=ann_aliases,
         )
         manager_path = (getattr(self.definition, "manager", None) or "").strip() or "objects.all"
         qs: Any = resolve_manager_to_queryset(model_cls, manager_path)
         filter_config = getattr(self.definition, "filter_config", None) or {}
         req_filters = self._filter_request()
-        validate_filter_kwargs_for_model(model_cls, req_filters)
+        validate_filter_kwargs_for_model(
+            model_cls, req_filters, annotation_aliases=ann_aliases
+        )
         self._cached_queryset = qs.filter(**filter_config, **req_filters)
         order_by = _normalize_order_by(getattr(self.definition, "order_by", None))
         if order_by:

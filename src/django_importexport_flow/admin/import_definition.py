@@ -227,6 +227,7 @@ class ImportDefinitionAdmin(AdminBoostModel):
                     "columns_exclude",
                     "exclude_primary_key",
                     "import_max_relation_hops",
+                    "import_match_fields",
                     "configuration",
                 )
             },

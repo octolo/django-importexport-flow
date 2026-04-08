@@ -9,7 +9,11 @@ from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
 from namedid import NamedIDField
 from ..managers import ExportManager
-from ..engine.core.validation import resolve_manager_to_queryset, validate_export_filter_fields
+from ..engine.core.validation import (
+    annotation_aliases_for_definition,
+    resolve_manager_to_queryset,
+    validate_export_filter_fields,
+)
 
 
 class ExportDefinition(AuditMixin, models.Model):
@@ -86,6 +90,18 @@ class ExportDefinition(AuditMixin, models.Model):
             'kwargs). Example: {"kwargs": {"group_id": "group_id"}} for …/group/<group_id>/'
         ),
     )
+    annotation_columns = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        verbose_name=_("Queryset annotation names"),
+        help_text=_(
+            "JSON list of names added by ``QuerySet.annotate()`` on the export manager "
+            "(e.g. [\"book_count\"]). Used to validate ``order_by``, filters, and table "
+            "columns. You can also declare the same under table configuration "
+            "``annotation_columns`` / ``annotations``."
+        ),
+    )
 
     objects = ExportManager()
 
@@ -111,6 +127,7 @@ class ExportDefinition(AuditMixin, models.Model):
             self.filter_request,
             self.filter_mandatory,
             self.order_by,
+            annotation_aliases=annotation_aliases_for_definition(self),
         )
         path = (self.manager or "").strip() or "objects.all"
         try:

@@ -9,7 +9,11 @@ from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
 from namedid import NamedIDField
 
-from ..engine.core.validation import validate_export_column_specs, validate_export_filter_fields
+from ..engine.core.validation import (
+    annotation_aliases_for_definition,
+    validate_export_filter_fields,
+    validate_import_match_fields,
+)
 
 
 class ImportDefinition(AuditMixin, models.Model):
@@ -116,6 +120,19 @@ class ImportDefinition(AuditMixin, models.Model):
             "(a high internal cap applies)."
         ),
     )
+    import_match_fields = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        verbose_name=_("Import match fields"),
+        help_text=_(
+            "Optional list of target model field names used to find existing rows before "
+            "updating (e.g. [\"email\"] for users). Empty = always create new rows. "
+            "Values from static filters (filter_config) and request filters are added to "
+            "the lookup automatically so imports stay scoped. "
+            "Each row must provide non-empty values for every match field."
+        ),
+    )
     configuration = models.JSONField(
         default=dict,
         blank=True,
@@ -147,9 +164,9 @@ class ImportDefinition(AuditMixin, models.Model):
             self.filter_request,
             self.filter_mandatory,
             self.order_by,
+            annotation_aliases=annotation_aliases_for_definition(self),
         )
-        if self.columns_exclude:
-            validate_export_column_specs(model, self.columns_exclude)
+        validate_import_match_fields(model, self.import_match_fields)
         if self.import_max_relation_hops is not None and self.import_max_relation_hops < 0:
             raise ValidationError(
                 {

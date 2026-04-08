@@ -47,20 +47,19 @@ def test_report_definition_rejects_overlapping_filter_request_mandatory_get_mism
 
 
 @pytest.mark.django_db
-def test_report_config_table_rejects_unknown_column():
+def test_report_config_table_accepts_unknown_column():
     ct = ContentType.objects.get_for_model(Book)
     d = ExportDefinition.objects.create(
-        name="Bad cols",
+        name="Unknown path ok",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    with pytest.raises(ValidationError):
-        ExportConfigTable.objects.create(
-            export=d,
-            columns=["not_a_field"],
-            configuration={},
-        )
+    ExportConfigTable.objects.create(
+        export=d,
+        columns=["not_a_field"],
+        configuration={},
+    )
 
 
 @pytest.mark.django_db

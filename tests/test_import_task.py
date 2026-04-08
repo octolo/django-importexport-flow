@@ -57,6 +57,38 @@ def test_dispatch_thread_backend_sets_processing_then_success(settings, auditor_
 
 
 @pytest.mark.django_db
+def test_import_match_fields_updates_existing_row(settings, auditor_user):
+    """Rows keyed by import_match_fields use update_or_create instead of always inserting."""
+    settings.DJANGO_IMPORTEXPORT_FLOW = {"IMPORT_TASK_BACKEND": "sync"}
+    ct = ContentType.objects.get_for_model(Book)
+    Book.objects.create(title="MatchKey", pages=1)
+    definition = ImportDefinition.objects.create(
+        name="Upsert by title",
+        target=ct,
+        filter_config={},
+        import_match_fields=["title"],
+        columns_exclude=_book_columns_exclude_all_but("title", "pages"),
+    )
+    t_v = str(Book._meta.get_field("title").verbose_name)
+    p_v = str(Book._meta.get_field("pages").verbose_name)
+    raw = f"{t_v},{p_v}\nMatchKey,99\n".encode("utf-8")
+    buf = BytesIO(raw)
+    buf.name = "upsert.csv"
+    out = process_import(
+        file=buf,
+        import_definition=definition,
+        user=auditor_user,
+        filter_payload={},
+        preview_only=False,
+        run_async=False,
+    )
+    ask = out["import_request"]
+    assert ask.status == ImportRequest.Status.SUCCESS
+    assert Book.objects.filter(title="MatchKey").count() == 1
+    assert Book.objects.get(title="MatchKey").pages == 99
+
+
+@pytest.mark.django_db
 def test_run_import_request_idempotent_after_success(settings, auditor_user):
     settings.DJANGO_IMPORTEXPORT_FLOW = {"IMPORT_TASK_BACKEND": "sync"}
     ct = ContentType.objects.get_for_model(Book)

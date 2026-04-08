@@ -71,12 +71,65 @@ def _append_row_error(
     errors.append(str(_("Row %(i)s: %(err)s") % {"i": line_no, "err": exc}))
 
 
+def _row_match_value_unusable(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def _upsert_lookups_for_row(
+    merged: dict[str, Any],
+    scope_base: dict[str, Any],
+    scope_dyn: dict[str, Any],
+    match_fields: list[str],
+) -> dict[str, Any]:
+    """
+    Build ``update_or_create`` lookup kwargs: scope (static + dynamic filters) plus
+    row match fields. Raises ``ValueError`` when a declared match field is missing
+    or empty for this row.
+    """
+    lookups: dict[str, Any] = {}
+    for key in scope_base:
+        if key in merged:
+            lookups[key] = merged[key]
+    for key in scope_dyn:
+        if key in merged:
+            lookups[key] = merged[key]
+    for key in match_fields:
+        if key not in merged or _row_match_value_unusable(merged[key]):
+            raise ValueError(
+                str(
+                    _("Match field %(field)s is missing or empty in this row.")
+                    % {"field": key}
+                )
+            )
+        lookups[key] = merged[key]
+    return lookups
+
+
 def _persist_one_row(
     model: type,
     merged: dict[str, Any],
     m2m_slots: dict[str, dict[int, dict[str, Any]]],
+    *,
+    match_fields: list[str] | None = None,
+    scope_base: dict[str, Any] | None = None,
+    scope_dyn: dict[str, Any] | None = None,
 ) -> None:
-    obj = model.objects.create(**merged)
+    mfields = [str(x).strip() for x in (match_fields or []) if str(x).strip()]
+    if mfields:
+        lookups = _upsert_lookups_for_row(
+            merged,
+            scope_base or {},
+            scope_dyn or {},
+            mfields,
+        )
+        defaults = {k: v for k, v in merged.items() if k not in lookups}
+        obj, _ = model.objects.update_or_create(**lookups, defaults=defaults)
+    else:
+        obj = model.objects.create(**merged)
     _apply_slot_relations(obj, model, m2m_slots)
 
 
@@ -117,6 +170,12 @@ def _execute_rows(
     except Exception as exc:
         return 0, [str(exc)]
 
+    match_fields = [
+        str(x).strip()
+        for x in (import_definition.import_match_fields or [])
+        if x is not None and str(x).strip()
+    ]
+
     raw_batch = int(get_setting("TABULAR_IMPORT_BATCH_SIZE"))
     batch_size = raw_batch if raw_batch > 0 else 500
 
@@ -142,13 +201,24 @@ def _execute_rows(
         slice_rows = prepared[offset : offset + batch_size]
         offset += len(slice_rows)
 
-        if batch_size == 1 or any(
-            import_row_slots_need_post_create(slots) for _, _, slots in slice_rows
+        if (
+            batch_size == 1
+            or match_fields
+            or any(
+                import_row_slots_need_post_create(slots) for _, _, slots in slice_rows
+            )
         ):
             for row_idx, merged, m2m_slots in slice_rows:
                 try:
                     with transaction.atomic():
-                        _persist_one_row(model, merged, m2m_slots)
+                        _persist_one_row(
+                            model,
+                            merged,
+                            m2m_slots,
+                            match_fields=match_fields,
+                            scope_base=base,
+                            scope_dyn=dyn,
+                        )
                     n += 1
                 except Exception as exc:
                     _append_row_error(
@@ -168,7 +238,14 @@ def _execute_rows(
             for row_idx, merged, m2m_slots in slice_rows:
                 try:
                     with transaction.atomic():
-                        _persist_one_row(model, merged, m2m_slots)
+                        _persist_one_row(
+                            model,
+                            merged,
+                            m2m_slots,
+                            match_fields=match_fields,
+                            scope_base=base,
+                            scope_dyn=dyn,
+                        )
                     n += 1
                 except Exception as exc:
                     _append_row_error(

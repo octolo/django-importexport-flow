@@ -2,25 +2,87 @@
 
 from __future__ import annotations
 
-from typing import Any
+from functools import cached_property as functools_cached_property
+from typing import Any, Collection
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import JSONField, ManyToManyField
+from django.db.models import ManyToManyField
 from django.utils.translation import gettext_lazy as _
 
-from ...utils.helpers import (
-    M2M_SLOT_PATH_PATTERN,
-    _next_model_for_rel_field,
-    get_field_or_accessor,
-    normalize_table_column,
-    parse_reverse_expand_spec,
-    resolve_expand_relation,
-)
+from ...utils.helpers import get_field_or_accessor
 
 
 def first_lookup_segment(lookup: str) -> str:
     return lookup.split("__", 1)[0]
+
+
+def normalized_annotation_name_list(raw: Any) -> list[str]:
+    """Normalize a JSON list of annotation / alias names to non-empty strings."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if isinstance(x, str) and str(x).strip()]
+
+
+def annotation_column_aliases_from_config(configuration: Any) -> frozenset[str]:
+    """
+    Column names supplied by ``QuerySet.annotate()`` (or alias/extra output) that
+    are not ``Meta`` fields and not detectable on the model class. Declared on
+    ``ExportConfigTable.configuration`` (or ``ImportDefinition.configuration``)
+    under ``annotation_columns``, ``annotated_columns``, or ``annotations``:
+    each value is a JSON list of strings (merged).
+
+    Used only for ``order_by`` / filter validation together with export / import
+    ``annotation_columns`` and this configuration block.
+    """
+    if not isinstance(configuration, dict):
+        return frozenset()
+    names: list[str] = []
+    for key in ("annotation_columns", "annotated_columns", "annotations"):
+        block = configuration.get(key)
+        if isinstance(block, list):
+            names.extend(normalized_annotation_name_list(block))
+    return frozenset(names)
+
+
+def annotation_aliases_for_definition(definition: Any) -> frozenset[str]:
+    """
+    All queryset annotation names declared on a definition: ``annotation_columns``
+    on the model (export) plus any lists under ``configuration`` (export/import).
+    """
+    merged = annotation_column_aliases_from_config(getattr(definition, "configuration", None))
+    extra = normalized_annotation_name_list(getattr(definition, "annotation_columns", None))
+    return merged | frozenset(extra)
+
+
+def is_non_field_reader_on_model(model_cls: type[models.Model], name: str) -> bool:
+    """
+    True when ``name`` is a ``@property`` or ``cached_property`` on the model class
+    (readable on instances) but not a concrete/relational ORM field.
+    Used so export paths like ``author.name_upper`` or ``payload_preview`` validate
+    without listing them in ``annotation_columns``.
+    """
+    if get_field_or_accessor(model_cls, name) is not None:
+        return False
+    try:
+        from django.utils.functional import cached_property as django_cached_property_cls
+    except ImportError:  # pragma: no cover
+        django_cached_property_cls = None
+    for cls in model_cls.__mro__:
+        if name not in cls.__dict__:
+            continue
+        val = cls.__dict__[name]
+        if isinstance(val, property):
+            return True
+        if isinstance(val, functools_cached_property):
+            return True
+        if django_cached_property_cls is not None and isinstance(
+            val, django_cached_property_cls
+        ):
+            return True
+    return False
 
 
 def split_filter_mandatory(mandatory: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -73,16 +135,98 @@ def parse_filter_maps_from_definition(
     )
 
 
+def validate_import_match_fields(
+    model: type[models.Model],
+    names: Any,
+) -> None:
+    """
+    Ensure ``import_match_fields`` is a list of distinct top-level ORM field names
+    suitable for :meth:`~django.db.models.QuerySet.update_or_create` lookups.
+    """
+    if names in (None, []):
+        return
+    if not isinstance(names, list):
+        raise ValidationError(
+            {"import_match_fields": _("Must be a list of field name strings.")}
+        )
+    seen: set[str] = set()
+    for raw in names:
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValidationError(
+                {"import_match_fields": _("Each entry must be a non-empty field name.")}
+            )
+        name = raw.strip()
+        if name in seen:
+            raise ValidationError(
+                {
+                    "import_match_fields": _(
+                        "Duplicate field %(name)s in match keys."
+                    )
+                    % {"name": name}
+                }
+            )
+        seen.add(name)
+        if "." in name:
+            raise ValidationError(
+                {
+                    "import_match_fields": _(
+                        "%(name)s: use a single model field name, not a path."
+                    )
+                    % {"name": name}
+                }
+            )
+        try:
+            field = model._meta.get_field(name)
+        except Exception:
+            raise ValidationError(
+                {
+                    "import_match_fields": _(
+                        "%(name)s is not a field on %(model)s."
+                    )
+                    % {"name": name, "model": model.__name__}
+                }
+            )
+        if isinstance(field, ManyToManyField) or getattr(field, "many_to_many", False):
+            raise ValidationError(
+                {
+                    "import_match_fields": _(
+                        "%(name)s: many-to-many fields cannot be used as match keys."
+                    )
+                    % {"name": name}
+                }
+            )
+        if field.is_relation and not (
+            getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False)
+        ):
+            raise ValidationError(
+                {
+                    "import_match_fields": _(
+                        "%(name)s: only forward scalar, foreign key, and one-to-one "
+                        "fields can be used as match keys."
+                    )
+                    % {"name": name}
+                }
+            )
+
+
 def validate_filter_kwargs_for_model(
-    model: type[models.Model], kwargs: dict[str, Any] | None
+    model: type[models.Model],
+    kwargs: dict[str, Any] | None,
+    *,
+    annotation_aliases: Collection[str] | None = None,
 ) -> None:
     """Reject unknown field names in ``filter()`` kwargs (first segment of each key)."""
     if not kwargs:
         return
+    aliases = frozenset(annotation_aliases) if annotation_aliases else frozenset()
     for key in kwargs:
         if not isinstance(key, str):
             raise ValidationError(_("Filter keys must be strings."))
         base = first_lookup_segment(key)
+        if base in aliases:
+            continue
+        if is_non_field_reader_on_model(model, base):
+            continue
         if get_field_or_accessor(model, base) is None:
             raise ValidationError(
                 _(
@@ -130,69 +274,6 @@ def coerce_request_filter_value(model: type[models.Model], orm_key: str, raw: st
         ) from exc
 
 
-def validate_export_column_spec(model: type[models.Model], spec: str) -> None:
-    """One column string: scalar path or reverse expand spec."""
-    spec = normalize_table_column(spec)
-    parsed = parse_reverse_expand_spec(spec)
-    if parsed:
-        rel, _sub = parsed
-        resolve_expand_relation(model, rel)
-        return
-    m = M2M_SLOT_PATH_PATTERN.match(spec)
-    if m:
-        rel_name, _slot_s, sub = m.groups()
-        rel_field = get_field_or_accessor(model, rel_name)
-        rm = None
-        if isinstance(rel_field, ManyToManyField):
-            rm = rel_field.remote_field.model
-        elif getattr(rel_field, "one_to_many", False) and not getattr(
-            rel_field, "many_to_many", False
-        ):
-            fk = getattr(rel_field, "remote_field", None)
-            if fk is not None and getattr(fk, "many_to_one", False):
-                rm = rel_field.related_model
-        if rm is None:
-            raise ValidationError(
-                _(
-                    "Invalid column: %(path)s — “%(seg)s” is not a many-to-many "
-                    "or reverse foreign key accessor."
-                )
-                % {"path": spec, "seg": rel_name}
-            )
-        validate_export_column_spec(rm, sub)
-        return
-    parts = spec.split(".")
-    current = model
-    for i, part in enumerate(parts):
-        field = get_field_or_accessor(current, part)
-        if field is None:
-            raise ValidationError(
-                _("Invalid column: %(path)s — unknown segment “%(seg)s” on %(model)s.")
-                % {"path": spec, "seg": part, "model": current.__name__}
-            )
-        if i == len(parts) - 1:
-            return
-        if isinstance(field, JSONField):
-            return
-        if isinstance(field, ManyToManyField):
-            raise ValidationError(
-                _("Invalid column: %(path)s — use slot form “field.0.subfield” for many-to-many.")
-                % {"path": spec}
-            )
-        if not field.is_relation:
-            raise ValidationError(
-                _("Invalid column: %(path)s — segment “%(seg)s” is not a relation.")
-                % {"path": spec, "seg": part}
-            )
-        nxt = _next_model_for_rel_field(field)
-        if nxt is None:
-            raise ValidationError(
-                _("Invalid column: %(path)s — cannot traverse past “%(seg)s”.")
-                % {"path": spec, "seg": part}
-            )
-        current = nxt
-
-
 def validate_filter_request_mandatory_get_overlap(
     filter_request: Any,
     filter_mandatory: Any,
@@ -213,7 +294,12 @@ def validate_filter_request_mandatory_get_overlap(
             )
 
 
-def validate_filter_mandatory_for_model(model: type[models.Model], mandatory: Any) -> None:
+def validate_filter_mandatory_for_model(
+    model: type[models.Model],
+    mandatory: Any,
+    *,
+    annotation_aliases: Collection[str] | None = None,
+) -> None:
     """
     ``filter_mandatory``: ``{"get": {...}, "kwargs": {...}}``, or shorthand
     ``{query_param: orm_key}`` (all GET) when ``get`` / ``kwargs`` keys are absent.
@@ -224,23 +310,34 @@ def validate_filter_mandatory_for_model(model: type[models.Model], mandatory: An
         raise ValidationError(_("filter_mandatory must be a JSON object."))
     if "get" not in mandatory and "kwargs" not in mandatory:
         for _param, orm_key in mandatory.items():
-            validate_filter_kwargs_for_model(model, {orm_key: 1})
+            validate_filter_kwargs_for_model(
+                model, {orm_key: 1}, annotation_aliases=annotation_aliases
+            )
         return
     get_map = mandatory.get("get")
     if get_map is not None:
         if not isinstance(get_map, dict):
             raise ValidationError(_("filter_mandatory.get must be an object."))
         for _param, orm_key in get_map.items():
-            validate_filter_kwargs_for_model(model, {orm_key: 1})
+            validate_filter_kwargs_for_model(
+                model, {orm_key: 1}, annotation_aliases=annotation_aliases
+            )
     kw_map = mandatory.get("kwargs")
     if kw_map is not None:
         if not isinstance(kw_map, dict):
             raise ValidationError(_("filter_mandatory.kwargs must be an object."))
         for _url_name, orm_key in kw_map.items():
-            validate_filter_kwargs_for_model(model, {orm_key: 1})
+            validate_filter_kwargs_for_model(
+                model, {orm_key: 1}, annotation_aliases=annotation_aliases
+            )
 
 
-def validate_order_by_for_model(model: type[models.Model], order_by: Any) -> None:
+def validate_order_by_for_model(
+    model: type[models.Model],
+    order_by: Any,
+    *,
+    annotation_aliases: Collection[str] | None = None,
+) -> None:
     """
     ``order_by`` is a list of Django ordering strings (e.g. ``["title", "-pages"]``).
     ``"?"`` is allowed for random ordering.
@@ -260,6 +357,11 @@ def validate_order_by_for_model(model: type[models.Model], order_by: Any) -> Non
         base = first_lookup_segment(stripped)
         if base == "pk":
             continue
+        aliases = frozenset(annotation_aliases) if annotation_aliases else frozenset()
+        if base in aliases:
+            continue
+        if is_non_field_reader_on_model(model, base):
+            continue
         if get_field_or_accessor(model, base) is None:
             raise ValidationError(
                 _("Invalid order_by: %(expr)r — %(base)r is not a field on %(model)s.")
@@ -273,24 +375,23 @@ def validate_export_filter_fields(
     filter_request: Any,
     filter_mandatory: Any,
     order_by: Any,
+    *,
+    annotation_aliases: Collection[str] | None = None,
 ) -> None:
     """Shared filter / ordering validation for report definitions and imports."""
-    validate_filter_kwargs_for_model(model, filter_config or {})
+    validate_filter_kwargs_for_model(
+        model, filter_config or {}, annotation_aliases=annotation_aliases
+    )
     fr, _, _, _ = parse_filter_maps(filter_request, filter_mandatory)
     for _param, orm_key in fr.items():
-        validate_filter_kwargs_for_model(model, {orm_key: 1})
+        validate_filter_kwargs_for_model(
+            model, {orm_key: 1}, annotation_aliases=annotation_aliases
+        )
     validate_filter_request_mandatory_get_overlap(filter_request, filter_mandatory)
-    validate_filter_mandatory_for_model(model, filter_mandatory)
-    validate_order_by_for_model(model, order_by)
-
-
-def validate_export_column_specs(model: type[models.Model], columns: list[Any] | None) -> None:
-    if not columns:
-        return
-    for col in columns:
-        if not isinstance(col, str):
-            raise ValidationError(_("Each column must be a string."))
-        validate_export_column_spec(model, col)
+    validate_filter_mandatory_for_model(
+        model, filter_mandatory, annotation_aliases=annotation_aliases
+    )
+    validate_order_by_for_model(model, order_by, annotation_aliases=annotation_aliases)
 
 
 def resolve_manager_to_queryset(model: type[models.Model], manager_path: str) -> Any:

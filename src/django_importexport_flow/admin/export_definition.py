@@ -55,7 +55,7 @@ class ExportDefinitionAdmin(AdminBoostModel):
         (None, {"fields": ("name", "named_id", "uuid", "description")}),
         (
             _("Model and queryset"),
-            {"fields": ("target", "manager", "order_by")},
+            {"fields": ("target", "manager", "order_by", "annotation_columns")},
         ),
         (
             _("Filters"),
