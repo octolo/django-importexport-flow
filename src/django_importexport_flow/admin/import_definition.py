@@ -26,7 +26,7 @@ from ..forms import (
 )
 from ..models import ImportDefinition, ImportRequest
 from ..models.data_preview import DataPreviewRow
-from ..utils.http import content_disposition_attachment
+from ..utils.http import configuration_json_download_response, content_disposition_attachment
 from ..utils.helpers import get_setting
 from ..engine.core.import_ import (
     create_import_request,
@@ -221,13 +221,14 @@ class ImportDefinitionAdmin(AdminBoostModel):
             {"fields": ("filter_config", "filter_request", "filter_mandatory")},
         ),
         (
-            _("Table export"),
+            _("Import"),
             {
                 "fields": (
                     "columns_exclude",
                     "exclude_primary_key",
-                    "import_max_relation_hops",
-                    "import_match_fields",
+                    "max_relation_hops",
+                    "exclude_relations",
+                    "match_fields",
                     "configuration",
                 )
             },
@@ -240,7 +241,7 @@ class ImportDefinitionAdmin(AdminBoostModel):
 
     @admin_boost_view("json", _("Export configuration (JSON)"))
     def export_configuration_json(self, request, obj):
-        return serialize_import_definition(obj)
+        return configuration_json_download_response(obj, serialize_import_definition(obj))
 
     @admin_boost_view("adminform", _("Import configuration (JSON)"))
     def import_configuration_json(self, request, form=None):

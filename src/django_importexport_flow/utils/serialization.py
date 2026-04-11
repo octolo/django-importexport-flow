@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import uuid
 from itertools import chain
 from typing import Any
 
@@ -11,12 +12,14 @@ from django.core import serializers
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
+from ..engine.core.validation import normalized_annotation_name_list
 from ..models import ExportConfigPdf, ExportConfigTable, ExportDefinition, ImportDefinition
 from .helpers import get_setting
 
 FORMAT_VERSION = get_setting("SERIALIZATION_FORMAT_VERSION")
 
 _EXPORT_DEFINITION_MODEL = "django_importexport_flow.exportdefinition"
+_EXPORT_CONFIG_TABLE_MODEL = "django_importexport_flow.exportconfigtable"
 _IMPORT_DEFINITION_MODEL = "django_importexport_flow.importdefinition"
 
 _LEGACY_REPORTING_SUFFIX_TO_EXPORT = {
@@ -111,13 +114,60 @@ def _normalize_legacy_export_json_fk_fields(objects: list[dict[str, Any]]) -> No
 
 
 def _normalize_export_definition_annotation_columns(objects: list[dict[str, Any]]) -> None:
-    """JSON imports without ``annotation_columns`` (field added in 0004)."""
+    """
+    Legacy ``ExportDefinition.annotation_columns`` is removed: merge into the linked
+    ``ExportConfigTable.configuration`` in the same payload, then drop the field.
+    """
+    export_ann_by_pk: dict[Any, list[str]] = {}
     for o in objects:
         if o.get("model") != _EXPORT_DEFINITION_MODEL:
             continue
         fields = o.get("fields")
-        if isinstance(fields, dict) and "annotation_columns" not in fields:
-            fields.setdefault("annotation_columns", [])
+        if not isinstance(fields, dict):
+            continue
+        ann = fields.pop("annotation_columns", None)
+        if not isinstance(ann, list) or not ann:
+            continue
+        names = normalized_annotation_name_list(ann)
+        if not names:
+            continue
+        pk = o.get("pk")
+        export_ann_by_pk[pk] = names
+    if not export_ann_by_pk:
+        return
+    for o in objects:
+        if o.get("model") != _EXPORT_CONFIG_TABLE_MODEL:
+            continue
+        fields = o.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        exp = fields.get("export")
+        if exp not in export_ann_by_pk:
+            continue
+        cfg = fields.get("configuration")
+        if not isinstance(cfg, dict):
+            cfg = {}
+            fields["configuration"] = cfg
+        existing: list[str] = []
+        for key in ("annotation_columns", "annotated_columns", "annotations"):
+            block = cfg.get(key)
+            if isinstance(block, list):
+                existing.extend(normalized_annotation_name_list(block))
+        merged = existing + export_ann_by_pk[exp]
+        cfg["annotation_columns"] = list(dict.fromkeys(merged))
+
+
+def _normalize_export_definition_manager_kwargs(objects: list[dict[str, Any]]) -> None:
+    """JSON imports without ``manager_kwargs_*`` fields."""
+    for o in objects:
+        if o.get("model") != _EXPORT_DEFINITION_MODEL:
+            continue
+        fields = o.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        fields.setdefault("manager_kwargs_config", {})
+        fields.setdefault("manager_kwargs_request", {})
+        fields.setdefault("manager_kwargs_mandatory", {})
 
 
 def _export_definition_name_from_payload(objects: list[dict[str, Any]]) -> str | None:
@@ -162,8 +212,16 @@ def _normalize_legacy_import_definition_columns_field(objects: list[dict[str, An
             fields.setdefault("columns_exclude", [])
         if "exclude_primary_key" not in fields:
             fields.setdefault("exclude_primary_key", True)
-        if "import_match_fields" not in fields:
-            fields.setdefault("import_match_fields", [])
+        if "match_fields" not in fields and "import_match_fields" not in fields:
+            fields.setdefault("match_fields", [])
+        if "import_match_fields" in fields and "match_fields" not in fields:
+            fields["match_fields"] = fields.pop("import_match_fields")
+        elif "import_match_fields" in fields:
+            fields.pop("import_match_fields")
+        if "import_max_relation_hops" in fields and "max_relation_hops" not in fields:
+            fields["max_relation_hops"] = fields.pop("import_max_relation_hops")
+        elif "import_max_relation_hops" in fields:
+            fields.pop("import_max_relation_hops")
 
 
 def _normalize_legacy_import_definition_integer_pk(objects: list[dict[str, Any]]) -> None:
@@ -305,6 +363,7 @@ def import_export_configuration(data: dict[str, Any]) -> ExportDefinition:
     _normalize_legacy_export_json_fk_fields(objects)
     _normalize_legacy_export_definition_integer_pks(objects)
     _normalize_export_definition_annotation_columns(objects)
+    _normalize_export_definition_manager_kwargs(objects)
     incoming_name = _export_definition_name_from_payload(objects)
     if incoming_name:
         existing = ExportDefinition.objects.filter(name=incoming_name).order_by("pk").first()

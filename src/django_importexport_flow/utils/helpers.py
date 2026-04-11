@@ -31,6 +31,7 @@ __all__ = [
     "safe_download_stem",
     "export_timestamp_for_filename",
     "dated_export_filename",
+    "configuration_json_download_filename",
 ]
 
 # ``book_set.*[title:pages]`` — reverse manager, repeated columns per related row
@@ -425,6 +426,26 @@ def dated_export_filename(safe_stem: str, ext: str) -> str:
     ``ext`` must include the leading dot (e.g. ``.csv``).
     """
     return f"{safe_stem}_{export_timestamp_for_filename()}{ext}"
+
+
+def configuration_json_download_filename(instance: Any) -> str:
+    """
+    Basename for admin *Export configuration (JSON)* downloads:
+    ``{named_id}-{updated_at_local}.json``.
+    """
+    from django.utils import timezone
+
+    raw_id = getattr(instance, "named_id", None)
+    stem = safe_download_stem(
+        str(raw_id) if raw_id not in (None, "") else None,
+        fallback="configuration",
+    )
+    updated = getattr(instance, "updated_at", None)
+    if updated is not None:
+        ts_part = timezone.localtime(updated).strftime("%Y%m%d_%H%M%S")
+    else:
+        ts_part = export_timestamp_for_filename()
+    return f"{stem}-{ts_part}.json"
 
 
 def get_setting(name: str, default: Any | None = None) -> Any:

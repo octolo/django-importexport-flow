@@ -30,12 +30,12 @@ def annotation_column_aliases_from_config(configuration: Any) -> frozenset[str]:
     """
     Column names supplied by ``QuerySet.annotate()`` (or alias/extra output) that
     are not ``Meta`` fields and not detectable on the model class. Declared on
-    ``ExportConfigTable.configuration`` (or ``ImportDefinition.configuration``)
+    ``ExportConfigTable.configuration`` or ``ImportDefinition.configuration``
     under ``annotation_columns``, ``annotated_columns``, or ``annotations``:
     each value is a JSON list of strings (merged).
 
-    Used only for ``order_by`` / filter validation together with export / import
-    ``annotation_columns`` and this configuration block.
+    Used for ``order_by`` / filter validation together with
+    :func:`annotation_aliases_for_definition`.
     """
     if not isinstance(configuration, dict):
         return frozenset()
@@ -47,14 +47,30 @@ def annotation_column_aliases_from_config(configuration: Any) -> frozenset[str]:
     return frozenset(names)
 
 
+def _export_table_configuration_for_aliases(definition: Any) -> dict[str, Any] | None:
+    """``ExportConfigTable.configuration`` when ``definition`` is an export with a table row."""
+    try:
+        ct = definition.config_table
+    except Exception:
+        return None
+    cfg = getattr(ct, "configuration", None)
+    return cfg if isinstance(cfg, dict) else None
+
+
 def annotation_aliases_for_definition(definition: Any) -> frozenset[str]:
     """
-    All queryset annotation names declared on a definition: ``annotation_columns``
-    on the model (export) plus any lists under ``configuration`` (export/import).
+    Annotation / alias names for filter and ``order_by`` validation:
+
+    * **Import** — lists under :attr:`~django_importexport_flow.models.ImportDefinition.configuration`
+      (``annotation_columns``, ``annotated_columns``, ``annotations``).
+    * **Export** — same keys under :class:`~django_importexport_flow.models.ExportConfigTable`
+      ``configuration`` only (queryset shape stays on :class:`~django_importexport_flow.models.ExportDefinition`).
     """
     merged = annotation_column_aliases_from_config(getattr(definition, "configuration", None))
-    extra = normalized_annotation_name_list(getattr(definition, "annotation_columns", None))
-    return merged | frozenset(extra)
+    merged = merged | annotation_column_aliases_from_config(
+        _export_table_configuration_for_aliases(definition)
+    )
+    return merged
 
 
 def is_non_field_reader_on_model(model_cls: type[models.Model], name: str) -> bool:
@@ -62,7 +78,7 @@ def is_non_field_reader_on_model(model_cls: type[models.Model], name: str) -> bo
     True when ``name`` is a ``@property`` or ``cached_property`` on the model class
     (readable on instances) but not a concrete/relational ORM field.
     Used so export paths like ``author.name_upper`` or ``payload_preview`` validate
-    without listing them in ``annotation_columns``.
+    without listing them in table ``configuration`` / ``annotation_columns``.
     """
     if get_field_or_accessor(model_cls, name) is not None:
         return False
@@ -135,31 +151,61 @@ def parse_filter_maps_from_definition(
     )
 
 
+def parse_manager_kwargs_maps_from_definition(
+    definition: Any,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Like :func:`parse_filter_maps_from_definition` for ``manager_kwargs_*`` on exports."""
+    return parse_filter_maps(
+        getattr(definition, "manager_kwargs_request", None),
+        getattr(definition, "manager_kwargs_mandatory", None),
+    )
+
+
+def validate_export_filter_manager_disjoint(definition: Any) -> None:
+    """
+    Query param and URL kwarg names must not overlap between ``filter_*`` and
+    ``manager_kwargs_*`` (distinct ``fr_get_*`` vs ``mg_get_*`` form keys).
+    """
+    fr, _f_mand, fget, fkw = parse_filter_maps_from_definition(definition)
+    mr, _m_mand, mget, mkw = parse_manager_kwargs_maps_from_definition(definition)
+    g_overlap = (set(fr) | set(fget)) & (set(mr) | set(mget))
+    kw_overlap = set(fkw) & set(mkw)
+    if g_overlap or kw_overlap:
+        names = sorted(g_overlap | kw_overlap)
+        raise ValidationError(
+            _(
+                "filter_request / filter_mandatory and manager_kwargs_* must use distinct "
+                "query param and URL kwarg names (overlap: %(overlap)s)."
+            )
+            % {"overlap": ", ".join(names)}
+        )
+
+
 def validate_import_match_fields(
     model: type[models.Model],
     names: Any,
 ) -> None:
     """
-    Ensure ``import_match_fields`` is a list of distinct top-level ORM field names
+    Ensure ``match_fields`` is a list of distinct top-level ORM field names
     suitable for :meth:`~django.db.models.QuerySet.update_or_create` lookups.
     """
     if names in (None, []):
         return
     if not isinstance(names, list):
         raise ValidationError(
-            {"import_match_fields": _("Must be a list of field name strings.")}
+            {"match_fields": _("Must be a list of field name strings.")}
         )
     seen: set[str] = set()
     for raw in names:
         if not isinstance(raw, str) or not raw.strip():
             raise ValidationError(
-                {"import_match_fields": _("Each entry must be a non-empty field name.")}
+                {"match_fields": _("Each entry must be a non-empty field name.")}
             )
         name = raw.strip()
         if name in seen:
             raise ValidationError(
                 {
-                    "import_match_fields": _(
+                    "match_fields": _(
                         "Duplicate field %(name)s in match keys."
                     )
                     % {"name": name}
@@ -169,7 +215,7 @@ def validate_import_match_fields(
         if "." in name:
             raise ValidationError(
                 {
-                    "import_match_fields": _(
+                    "match_fields": _(
                         "%(name)s: use a single model field name, not a path."
                     )
                     % {"name": name}
@@ -180,7 +226,7 @@ def validate_import_match_fields(
         except Exception:
             raise ValidationError(
                 {
-                    "import_match_fields": _(
+                    "match_fields": _(
                         "%(name)s is not a field on %(model)s."
                     )
                     % {"name": name, "model": model.__name__}
@@ -189,7 +235,7 @@ def validate_import_match_fields(
         if isinstance(field, ManyToManyField) or getattr(field, "many_to_many", False):
             raise ValidationError(
                 {
-                    "import_match_fields": _(
+                    "match_fields": _(
                         "%(name)s: many-to-many fields cannot be used as match keys."
                     )
                     % {"name": name}
@@ -200,7 +246,7 @@ def validate_import_match_fields(
         ):
             raise ValidationError(
                 {
-                    "import_match_fields": _(
+                    "match_fields": _(
                         "%(name)s: only forward scalar, foreign key, and one-to-one "
                         "fields can be used as match keys."
                     )
@@ -299,15 +345,29 @@ def validate_filter_mandatory_for_model(
     mandatory: Any,
     *,
     annotation_aliases: Collection[str] | None = None,
+    strict_orm_keys: bool = True,
 ) -> None:
     """
     ``filter_mandatory``: ``{"get": {...}, "kwargs": {...}}``, or shorthand
     ``{query_param: orm_key}`` (all GET) when ``get`` / ``kwargs`` keys are absent.
+
+    When ``strict_orm_keys`` is False (exports only), only JSON shape is checked so
+    annotation / manager-provided lookup names are allowed without resolving on the model.
     """
     if not mandatory:
         return
     if not isinstance(mandatory, dict):
         raise ValidationError(_("filter_mandatory must be a JSON object."))
+    if not strict_orm_keys:
+        if "get" not in mandatory and "kwargs" not in mandatory:
+            return
+        get_map = mandatory.get("get")
+        if get_map is not None and not isinstance(get_map, dict):
+            raise ValidationError(_("filter_mandatory.get must be an object."))
+        kw_map = mandatory.get("kwargs")
+        if kw_map is not None and not isinstance(kw_map, dict):
+            raise ValidationError(_("filter_mandatory.kwargs must be an object."))
+        return
     if "get" not in mandatory and "kwargs" not in mandatory:
         for _param, orm_key in mandatory.items():
             validate_filter_kwargs_for_model(
@@ -377,21 +437,77 @@ def validate_export_filter_fields(
     order_by: Any,
     *,
     annotation_aliases: Collection[str] | None = None,
+    manager_kwargs_config: Any = None,
+    manager_kwargs_request: Any = None,
+    manager_kwargs_mandatory: Any = None,
+    strict_orm_keys_for_filters: bool = True,
 ) -> None:
-    """Shared filter / ordering validation for report definitions and imports."""
-    validate_filter_kwargs_for_model(
-        model, filter_config or {}, annotation_aliases=annotation_aliases
-    )
-    fr, _, _, _ = parse_filter_maps(filter_request, filter_mandatory)
-    for _param, orm_key in fr.items():
+    """
+    Shared filter / ordering validation for export and import definitions.
+
+    ``strict_orm_keys_for_filters`` is True for imports: every filter / mandatory ORM
+    lookup must match a model field (or listed annotation alias). For exports it is
+    False so lookups may target queryset annotations or manager-only fields that are
+    not introspectable on the model class.
+    """
+    if strict_orm_keys_for_filters:
         validate_filter_kwargs_for_model(
-            model, {orm_key: 1}, annotation_aliases=annotation_aliases
+            model, filter_config or {}, annotation_aliases=annotation_aliases
         )
+    else:
+        if filter_config not in (None, {}) and not isinstance(filter_config, dict):
+            raise ValidationError(_("filter_config must be a JSON object."))
+        if filter_request not in (None, {}) and not isinstance(filter_request, dict):
+            raise ValidationError(_("filter_request must be a JSON object."))
+    fr, _fr_mand, _fr_get, _fr_kw = parse_filter_maps(filter_request, filter_mandatory)
+    if strict_orm_keys_for_filters:
+        for _param, orm_key in fr.items():
+            validate_filter_kwargs_for_model(
+                model, {orm_key: 1}, annotation_aliases=annotation_aliases
+            )
     validate_filter_request_mandatory_get_overlap(filter_request, filter_mandatory)
     validate_filter_mandatory_for_model(
-        model, filter_mandatory, annotation_aliases=annotation_aliases
+        model,
+        filter_mandatory,
+        annotation_aliases=annotation_aliases,
+        strict_orm_keys=strict_orm_keys_for_filters,
     )
     validate_order_by_for_model(model, order_by, annotation_aliases=annotation_aliases)
+    if (
+        manager_kwargs_config is not None
+        or manager_kwargs_request is not None
+        or manager_kwargs_mandatory is not None
+    ):
+        if strict_orm_keys_for_filters:
+            validate_filter_kwargs_for_model(
+                model, manager_kwargs_config or {}, annotation_aliases=annotation_aliases
+            )
+        elif manager_kwargs_config not in (None, {}) and not isinstance(
+            manager_kwargs_config, dict
+        ):
+            raise ValidationError(_("manager_kwargs_config must be a JSON object."))
+        if not strict_orm_keys_for_filters and manager_kwargs_request not in (
+            None,
+            {},
+        ) and not isinstance(manager_kwargs_request, dict):
+            raise ValidationError(_("manager_kwargs_request must be a JSON object."))
+        mgr_fr, _mgr_mand, _mgr_get, _mgr_kw = parse_filter_maps(
+            manager_kwargs_request, manager_kwargs_mandatory
+        )
+        if strict_orm_keys_for_filters:
+            for _param, orm_key in mgr_fr.items():
+                validate_filter_kwargs_for_model(
+                    model, {orm_key: 1}, annotation_aliases=annotation_aliases
+                )
+        validate_filter_request_mandatory_get_overlap(
+            manager_kwargs_request, manager_kwargs_mandatory
+        )
+        validate_filter_mandatory_for_model(
+            model,
+            manager_kwargs_mandatory,
+            annotation_aliases=annotation_aliases,
+            strict_orm_keys=strict_orm_keys_for_filters,
+        )
 
 
 def resolve_manager_to_queryset(model: type[models.Model], manager_path: str) -> Any:

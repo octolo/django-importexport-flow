@@ -11,7 +11,11 @@ import pandas as pd
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from ..engine.core.export import run_table_export, snapshot_export_filter_payload
+from ..engine.core.export import (
+    run_table_export,
+    snapshot_export_filter_payload,
+    snapshot_export_manager_kwargs_payload,
+)
 from ..engine.core.import_ import (
     create_import_request,
     effective_import_column_paths,
@@ -292,6 +296,7 @@ def run_export_with_audit(
     exception after recording the failure.
     """
     payload = snapshot_export_filter_payload(filter_payload)
+    mgr_payload = snapshot_export_manager_kwargs_payload(filter_payload)
     export_fmt = str(filter_payload.get("export_format") or "")
     try:
         content, content_type, ext = process_export(
@@ -308,6 +313,7 @@ def run_export_with_audit(
             export_definition=export_definition,
             export_format=export_fmt,
             filter_payload=payload,
+            manager_kwargs_payload=mgr_payload,
             status=ExportRequest.Status.FAILURE,
             error_trace=str(exc),
             completed_at=timezone.now(),
@@ -323,6 +329,7 @@ def run_export_with_audit(
             export_definition=export_definition,
             export_format=export_fmt,
             filter_payload=payload,
+            manager_kwargs_payload=mgr_payload,
             status=ExportRequest.Status.FAILURE,
             error_trace=traceback.format_exc(),
             completed_at=timezone.now(),
@@ -333,6 +340,7 @@ def run_export_with_audit(
         export_definition=export_definition,
         export_format=export_fmt,
         filter_payload=payload,
+        manager_kwargs_payload=mgr_payload,
         status=ExportRequest.Status.SUCCESS,
         output_bytes=len(content),
         completed_at=timezone.now(),

@@ -12,6 +12,24 @@ from .validation import (
 )
 
 
+def _root_definition(definition: Any) -> Any:
+    d = definition
+    seen: set[int] = set()
+    while hasattr(d, "_definition"):
+        inner = getattr(d, "_definition")
+        if id(inner) in seen:
+            break
+        seen.add(id(d))
+        d = inner
+    return d
+
+
+def _strict_orm_keys_for_filters(definition: Any) -> bool:
+    from ...models import ExportDefinition
+
+    return not isinstance(_root_definition(definition), ExportDefinition)
+
+
 def _normalize_order_by(raw: Any) -> list[str]:
     if not raw:
         return []
@@ -57,6 +75,7 @@ class CoreEngine:
         # order_by, and manager path before building SQL (also safe if engine is used
         # without going through model.save()).
         ann_aliases = annotation_aliases_for_definition(self.definition)
+        strict_filters = _strict_orm_keys_for_filters(self.definition)
         validate_export_filter_fields(
             model_cls,
             getattr(self.definition, "filter_config", None) or {},
@@ -64,14 +83,28 @@ class CoreEngine:
             getattr(self.definition, "filter_mandatory", None) or {},
             getattr(self.definition, "order_by", None) or [],
             annotation_aliases=ann_aliases,
+            manager_kwargs_config=getattr(self.definition, "manager_kwargs_config", None),
+            manager_kwargs_request=getattr(self.definition, "manager_kwargs_request", None),
+            manager_kwargs_mandatory=getattr(self.definition, "manager_kwargs_mandatory", None),
+            strict_orm_keys_for_filters=strict_filters,
         )
         manager_path = (getattr(self.definition, "manager", None) or "").strip() or "objects.all"
         qs: Any = resolve_manager_to_queryset(model_cls, manager_path)
+        manager_static = getattr(self.definition, "manager_kwargs_config", None) or {}
+        if not isinstance(manager_static, dict):
+            manager_static = {}
+        mgr_req_filters = self._manager_kwargs_from_request()
+        if strict_filters:
+            validate_filter_kwargs_for_model(
+                model_cls, mgr_req_filters, annotation_aliases=ann_aliases
+            )
+        qs = qs.filter(**manager_static, **mgr_req_filters)
         filter_config = getattr(self.definition, "filter_config", None) or {}
         req_filters = self._filter_request()
-        validate_filter_kwargs_for_model(
-            model_cls, req_filters, annotation_aliases=ann_aliases
-        )
+        if strict_filters:
+            validate_filter_kwargs_for_model(
+                model_cls, req_filters, annotation_aliases=ann_aliases
+            )
         self._cached_queryset = qs.filter(**filter_config, **req_filters)
         order_by = _normalize_order_by(getattr(self.definition, "order_by", None))
         if order_by:
@@ -106,6 +139,43 @@ class CoreEngine:
         for kw_name, orm_key in kw_map.items():
             if kw_name not in url_kwargs or url_kwargs[kw_name] in (None, ""):
                 raise ValueError(f"URL kwarg {kw_name!r} is required")
+            raw = str(url_kwargs[kw_name])
+            out[orm_key] = coerce_request_filter_value(model_cls, orm_key, raw)
+        return out
+
+    def _manager_kwargs_from_request(self) -> dict[str, Any]:
+        """Same rules as :meth:`_filter_request` for ``manager_kwargs_*`` on exports."""
+        out: dict[str, Any] = {}
+        model_cls = self.get_model()
+        if model_cls is None:
+            return out
+        mandatory = self._mandatory_dict(
+            getattr(self.definition, "manager_kwargs_mandatory", None)
+        )
+        mr = getattr(self.definition, "manager_kwargs_request", None) or {}
+        if not isinstance(mr, dict):
+            mr = {}
+        get_mandatory, kw_map = split_filter_mandatory(mandatory)
+        for param_name, orm_key in get_mandatory.items():
+            val = self.request.GET.get(param_name)
+            if val in (None, ""):
+                raise ValueError(
+                    f"Mandatory GET parameter {param_name!r} is required (manager kwargs)"
+                )
+            out[orm_key] = coerce_request_filter_value(model_cls, orm_key, val)
+        for param_name, orm_key in mr.items():
+            if param_name in get_mandatory:
+                continue
+            val = self.request.GET.get(param_name)
+            if val in (None, ""):
+                continue
+            out[orm_key] = coerce_request_filter_value(model_cls, orm_key, val)
+        url_kwargs = self._url_kwargs_from_request()
+        for kw_name, orm_key in kw_map.items():
+            if kw_name not in url_kwargs or url_kwargs[kw_name] in (None, ""):
+                raise ValueError(
+                    f"URL kwarg {kw_name!r} is required (manager kwargs)"
+                )
             raw = str(url_kwargs[kw_name])
             out[orm_key] = coerce_request_filter_value(model_cls, orm_key, raw)
         return out

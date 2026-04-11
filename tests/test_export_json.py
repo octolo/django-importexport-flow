@@ -10,6 +10,7 @@ from django_importexport_flow.models import (
     ExportConfigTable,
     ExportDefinition,
 )
+from django_importexport_flow.utils.helpers import configuration_json_download_filename
 from django_importexport_flow.utils.serialization import serialize_export_configuration
 from tests.sample.models import Book
 
@@ -50,6 +51,8 @@ def test_export_json_admin_boost_view(client):
     r = client.get(url)
     assert r.status_code == 200
     assert r["Content-Type"].startswith("application/json")
+    definition.refresh_from_db()
+    assert configuration_json_download_filename(definition) in (r.get("Content-Disposition") or "")
     data = json.loads(r.content)
     assert data["format_version"] == 1
     objs = data["objects"]

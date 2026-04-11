@@ -54,13 +54,13 @@ def test_resolve_table_column_label_book_set_slot():
 
 
 @pytest.mark.django_db
-def test_effective_import_paths_respects_import_max_relation_hops():
+def test_effective_import_paths_respects_max_relation_hops():
     """Hop limit trims nested paths (author.profile.bio, tags.0.category.name)."""
     ct = ContentType.objects.get_for_model(Book)
     ri = ImportDefinition.objects.create(
         name="Hop cap",
         target=ct,
-        import_max_relation_hops=1,
+        max_relation_hops=1,
         columns_exclude=[],
         filter_config={},
     )
@@ -79,7 +79,7 @@ def test_effective_import_paths_zero_hops_excludes_nested_and_slots():
     ri = ImportDefinition.objects.create(
         name="Zero hops",
         target=ct,
-        import_max_relation_hops=0,
+        max_relation_hops=0,
         columns_exclude=[],
         filter_config={},
     )
@@ -92,7 +92,7 @@ def test_effective_import_paths_zero_hops_excludes_nested_and_slots():
     ri_a = ImportDefinition.objects.create(
         name="Zero hops author",
         target=ct_a,
-        import_max_relation_hops=0,
+        max_relation_hops=0,
         columns_exclude=[],
         filter_config={},
     )

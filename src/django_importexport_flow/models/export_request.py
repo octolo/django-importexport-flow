@@ -44,6 +44,12 @@ class ExportRequest(AuditMixin, models.Model):
         verbose_name=_("Filter form payload"),
         help_text=_("export_format plus fr_get_* / fr_kw_* from the export form."),
     )
+    manager_kwargs_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Manager kwargs form payload"),
+        help_text=_("mg_get_* / mg_kw_* from the export form (manager_kwargs_* on the definition)."),
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,

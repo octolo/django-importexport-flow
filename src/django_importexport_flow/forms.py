@@ -31,7 +31,8 @@ EXPORT_FORMAT_CHOICES = (
 class ExportGenerateForm(forms.Form):
     """
     One input per GET query param (``fr_get_<name>``), same for ``filter_request`` and
-    ``filter_mandatory.get``; one per URL kwarg (``fr_kw_<name>``); then export format.
+    ``filter_mandatory.get``; one per URL kwarg (``fr_kw_<name>``); optional
+    ``mg_get_*`` / ``mg_kw_*`` for ``manager_kwargs_*`` on the export; then export format.
     ``filter_mandatory`` fields are required; ``filter_request``-only GET fields are optional.
     ``filter_config`` is not editable here (uses the report only).
     """

@@ -24,8 +24,7 @@ class ExportConfigTable(models.Model):
             "a ``JSONField`` (e.g. metadata.lang), an ``@property`` / ``cached_property`` "
             "on the model or a related model (e.g. author.name_upper), an expand spec: "
             "relation.*[field1:field2] for one-to-many relations, or a queryset annotation "
-            "name listed on the export (``annotation_columns``) and/or in this "
-            "configuration (``annotation_columns``, ``annotations``)."
+            "name declared in ``configuration`` (``annotation_columns``, ``annotations``)."
         ),
     )
     configuration = models.JSONField(

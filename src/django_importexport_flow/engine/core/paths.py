@@ -264,7 +264,9 @@ def effective_import_column_paths(import_definition: Any) -> list[str]:
     if model is None:
         return []
     include_pk = not getattr(import_definition, "exclude_primary_key", True)
-    hops = getattr(import_definition, "import_max_relation_hops", None)
+    hops = getattr(import_definition, "max_relation_hops", None)
+    if hops is None:
+        hops = getattr(import_definition, "import_max_relation_hops", None)
     base = default_importable_column_paths(
         model,
         include_primary_key=include_pk,
@@ -412,7 +414,7 @@ def infer_column_paths_from_headers(
     ``author.profile.bio``).
 
     ``max_relation_hops`` matches :func:`default_importable_column_paths` (e.g. pass
-    ``import_definition.import_max_relation_hops``).
+    ``import_definition.max_relation_hops``).
 
     Returns ``None`` if any header is unknown, ambiguous, or maps to a duplicate path.
     """
@@ -484,7 +486,9 @@ def resolve_import_column_paths(
     ):
         return [], normalized_headers
 
-    hops = getattr(import_definition, "import_max_relation_hops", None)
+    hops = getattr(import_definition, "max_relation_hops", None)
+    if hops is None:
+        hops = getattr(import_definition, "import_max_relation_hops", None)
     inferred = infer_column_paths_from_headers(
         model,
         [str(c) for c in df.columns],

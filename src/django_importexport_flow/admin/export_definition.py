@@ -17,7 +17,7 @@ from ..forms import ExportConfigurationImportForm, make_export_form_class
 from ..models import ExportConfigPdf, ExportConfigTable, ExportDefinition
 from ..utils.helpers import dated_export_filename, safe_download_stem
 from ..utils.process import run_export_with_audit
-from ..utils.http import content_disposition_attachment
+from ..utils.http import configuration_json_download_response, content_disposition_attachment
 from ..utils.serialization import import_export_configuration, serialize_export_configuration
 from .import_config import run_json_configuration_import
 
@@ -55,11 +55,24 @@ class ExportDefinitionAdmin(AdminBoostModel):
         (None, {"fields": ("name", "named_id", "uuid", "description")}),
         (
             _("Model and queryset"),
-            {"fields": ("target", "manager", "order_by", "annotation_columns")},
+            {
+                "fields": (
+                    "target",
+                    "manager",
+                    "manager_kwargs_config",
+                    "manager_kwargs_request",
+                    "manager_kwargs_mandatory",
+                    "order_by",
+                )
+            },
         ),
         (
             _("Filters"),
             {"fields": ("filter_config", "filter_request", "filter_mandatory")},
+        ),
+        (
+            _("Column traversal"),
+            {"fields": ("max_relation_hops", "exclude_relations")},
         ),
         (
             _("Audit"),
@@ -136,7 +149,7 @@ class ExportDefinitionAdmin(AdminBoostModel):
 
     @admin_boost_view("json", _("Export configuration (JSON)"))
     def export_configuration_json(self, request, obj):
-        return serialize_export_configuration(obj)
+        return configuration_json_download_response(obj, serialize_export_configuration(obj))
 
     @admin_boost_view("adminform", _("Import configuration (JSON)"))
     def import_configuration_json(self, request, form=None):

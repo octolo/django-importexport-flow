@@ -57,8 +57,8 @@ def test_dispatch_thread_backend_sets_processing_then_success(settings, auditor_
 
 
 @pytest.mark.django_db
-def test_import_match_fields_updates_existing_row(settings, auditor_user):
-    """Rows keyed by import_match_fields use update_or_create instead of always inserting."""
+def test_match_fields_updates_existing_row(settings, auditor_user):
+    """Rows keyed by match_fields use update_or_create instead of always inserting."""
     settings.DJANGO_IMPORTEXPORT_FLOW = {"IMPORT_TASK_BACKEND": "sync"}
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="MatchKey", pages=1)
@@ -66,7 +66,7 @@ def test_import_match_fields_updates_existing_row(settings, auditor_user):
         name="Upsert by title",
         target=ct,
         filter_config={},
-        import_match_fields=["title"],
+        match_fields=["title"],
         columns_exclude=_book_columns_exclude_all_but("title", "pages"),
     )
     t_v = str(Book._meta.get_field("title").verbose_name)

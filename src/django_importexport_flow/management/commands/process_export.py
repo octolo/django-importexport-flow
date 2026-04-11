@@ -22,7 +22,8 @@ _RECOVERABLE_EXPORT_ERRORS: tuple[type[BaseException], ...] = TABULAR_ENGINE_REC
 class Command(BaseCommand):
     help = (
         "Process a table export for an ExportDefinition. "
-        "Use --filter-json or --filter-json-file for fr_get_* / fr_kw_* keys (same as the admin form)."
+        "Use --filter-json or --filter-json-file for fr_get_* / fr_kw_* and optional "
+        "mg_get_* / mg_kw_* keys (same as the admin form)."
     )
 
     def add_arguments(self, parser) -> None:
@@ -49,7 +50,7 @@ class Command(BaseCommand):
             "--filter-json",
             dest="filter_json",
             default=None,
-            help="JSON object with filter keys (export_format, fr_get_*, fr_kw_*).",
+            help="JSON object with export_format, fr_get_*, fr_kw_*, optional mg_get_*, mg_kw_*.",
         )
         parser.add_argument(
             "--filter-json-file",

@@ -172,7 +172,7 @@ def _execute_rows(
 
     match_fields = [
         str(x).strip()
-        for x in (import_definition.import_match_fields or [])
+        for x in (getattr(import_definition, "match_fields", None) or getattr(import_definition, "import_match_fields", None) or [])
         if x is not None and str(x).strip()
     ]
 

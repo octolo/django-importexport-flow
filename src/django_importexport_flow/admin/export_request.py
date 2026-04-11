@@ -40,6 +40,7 @@ class ExportRequestAdmin(admin.ModelAdmin):
         "export_definition",
         "export_format",
         "filter_payload",
+        "manager_kwargs_payload",
         "status",
         "output_bytes",
         "error_trace",

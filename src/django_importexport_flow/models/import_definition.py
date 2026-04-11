@@ -109,7 +109,7 @@ class ImportDefinition(AuditMixin, models.Model):
             "from the default column set (in addition to columns exclude)."
         ),
     )
-    import_max_relation_hops = models.PositiveIntegerField(
+    max_relation_hops = models.PositiveIntegerField(
         null=True,
         blank=True,
         verbose_name=_("Max relation hops"),
@@ -119,18 +119,30 @@ class ImportDefinition(AuditMixin, models.Model):
             "relation paths (top-level columns only). Leave empty for no limit "
             "(a high internal cap applies)."
         ),
+        db_column="import_max_relation_hops",
     )
-    import_match_fields = models.JSONField(
+    match_fields = models.JSONField(
         default=list,
         blank=True,
         null=True,
-        verbose_name=_("Import match fields"),
+        verbose_name=_("Match fields"),
         help_text=_(
             "Optional list of target model field names used to find existing rows before "
             "updating (e.g. [\"email\"] for users). Empty = always create new rows. "
             "Values from static filters (filter_config) and request filters are added to "
             "the lookup automatically so imports stay scoped. "
             "Each row must provide non-empty values for every match field."
+        ),
+        db_column="import_match_fields",
+    )
+    exclude_relations = models.ManyToManyField(
+        ContentType,
+        blank=True,
+        related_name="excluded_from_imports",
+        verbose_name=_("Exclude relations"),
+        help_text=_(
+            "Content types whose relations should never be traversed "
+            "when building import column paths (e.g. auth.User)."
         ),
     )
     configuration = models.JSONField(
@@ -166,11 +178,11 @@ class ImportDefinition(AuditMixin, models.Model):
             self.order_by,
             annotation_aliases=annotation_aliases_for_definition(self),
         )
-        validate_import_match_fields(model, self.import_match_fields)
-        if self.import_max_relation_hops is not None and self.import_max_relation_hops < 0:
+        validate_import_match_fields(model, self.match_fields)
+        if self.max_relation_hops is not None and self.max_relation_hops < 0:
             raise ValidationError(
                 {
-                    "import_max_relation_hops": _(
+                    "max_relation_hops": _(
                         "Must be 0 or greater, or leave empty for no limit."
                     )
                 }

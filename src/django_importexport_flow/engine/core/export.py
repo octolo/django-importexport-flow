@@ -10,12 +10,21 @@ from django.http import HttpRequest, QueryDict
 from ...apps import DjangoImportExportFlowConfig
 from ...models import ExportConfigTable, ExportDefinition
 from .table import TableEngine
-from .validation import parse_filter_maps_from_definition
+from .validation import (
+    parse_filter_maps_from_definition,
+    parse_manager_kwargs_maps_from_definition,
+)
 
 
 def snapshot_export_filter_payload(cleaned_data: dict[str, Any]) -> dict[str, Any]:
     """JSON-safe subset for audit storage: ``export_format`` and ``fr_*`` keys only."""
     subset = {k: v for k, v in cleaned_data.items() if k == "export_format" or k.startswith("fr_")}
+    return json.loads(json.dumps(subset, default=str))
+
+
+def snapshot_export_manager_kwargs_payload(cleaned_data: dict[str, Any]) -> dict[str, Any]:
+    """JSON-safe subset for audit: ``mg_get_*`` / ``mg_kw_*`` only."""
+    subset = {k: v for k, v in cleaned_data.items() if k.startswith("mg_")}
     return json.loads(json.dumps(subset, default=str))
 
 
@@ -64,6 +73,16 @@ def form_field_name_for_url_kwarg(kw_name: str) -> str:
     return f"fr_kw_{kw_name}"
 
 
+def form_field_name_for_manager_query_param(param_name: str) -> str:
+    """GET key in the export payload for ``manager_kwargs_request`` / mandatory GET."""
+    return f"mg_get_{param_name}"
+
+
+def form_field_name_for_manager_url_kwarg(kw_name: str) -> str:
+    """URL kw key in the export payload for ``manager_kwargs_mandatory.kwargs``."""
+    return f"mg_kw_{kw_name}"
+
+
 def run_table_export(
     definition: Any,
     filter_payload: dict[str, Any],
@@ -73,18 +92,29 @@ def run_table_export(
     ``filter_config`` is taken from the report only (no export-time override).
 
     ``filter_payload`` uses the same keys as a validated export form (``export_format``,
-    ``fr_get_*``, ``fr_kw_*``) or any equivalent dict (e.g. from a management command).
+    ``fr_get_*``, ``fr_kw_*``, optional ``mg_get_*``, ``mg_kw_*``) or any equivalent dict.
 
     Returns ``(body_bytes, content_type, file_extension)`` — e.g. ``(".csv")``.
     The download filename (with timestamp) is set in the admin view.
     """
     fr, _mandatory, get_m, kw_map = parse_filter_maps_from_definition(definition)
-    all_get_params = set(fr) | set(get_m)
+    mgr_fr, _m2, mgr_get_m, mgr_kw_map = parse_manager_kwargs_maps_from_definition(
+        definition
+    )
+    filter_get = set(fr) | set(get_m)
+    manager_get = set(mgr_fr) | set(mgr_get_m)
     get_params: dict[str, str] = {}
-    for param_name in all_get_params:
+    for param_name in sorted(filter_get):
         form_key = form_field_name_for_query_param(param_name)
         if form_key not in filter_payload:
             raise ValueError(f"Missing filter payload key for request param {param_name!r}")
+        get_params[param_name] = str(filter_payload[form_key])
+    for param_name in sorted(manager_get):
+        form_key = form_field_name_for_manager_query_param(param_name)
+        if form_key not in filter_payload:
+            raise ValueError(
+                f"Missing manager kwargs payload key for request param {param_name!r}"
+            )
         get_params[param_name] = str(filter_payload[form_key])
 
     url_kw: dict[str, str] = {}
@@ -92,6 +122,13 @@ def run_table_export(
         fkey = form_field_name_for_url_kwarg(kw_name)
         if fkey not in filter_payload:
             raise ValueError(f"Missing filter payload key for URL kwarg {kw_name!r}")
+        url_kw[kw_name] = str(filter_payload[fkey])
+    for kw_name in mgr_kw_map:
+        fkey = form_field_name_for_manager_url_kwarg(kw_name)
+        if fkey not in filter_payload:
+            raise ValueError(
+                f"Missing manager kwargs payload key for URL kwarg {kw_name!r}"
+            )
         url_kw[kw_name] = str(filter_payload[fkey])
 
     merged = dict(getattr(definition, "filter_config", None) or {})
@@ -116,14 +153,24 @@ def build_http_request_from_filter_payload(
 ) -> HttpRequest:
     """Build a GET request + URL kwargs from the same keys as :func:`run_table_export`."""
     fr, _mandatory, get_m, kw_map = parse_filter_maps_from_definition(definition)
-    all_get_params = set(fr) | set(get_m)
+    mgr_fr, _m2, mgr_get_m, mgr_kw_map = parse_manager_kwargs_maps_from_definition(
+        definition
+    )
+    filter_get = set(fr) | set(get_m)
+    manager_get = set(mgr_fr) | set(mgr_get_m)
     get_params: dict[str, str] = {}
-    for param_name in all_get_params:
+    for param_name in sorted(filter_get):
         form_key = form_field_name_for_query_param(param_name)
+        get_params[param_name] = str(filter_payload.get(form_key, ""))
+    for param_name in sorted(manager_get):
+        form_key = form_field_name_for_manager_query_param(param_name)
         get_params[param_name] = str(filter_payload.get(form_key, ""))
     url_kw: dict[str, str] = {}
     for kw_name in kw_map:
         fkey = form_field_name_for_url_kwarg(kw_name)
+        url_kw[kw_name] = str(filter_payload.get(fkey, ""))
+    for kw_name in mgr_kw_map:
+        fkey = form_field_name_for_manager_url_kwarg(kw_name)
         url_kw[kw_name] = str(filter_payload.get(fkey, ""))
     request = build_request_with_get(get_params)
     attach_export_url_kwargs(request, url_kw)

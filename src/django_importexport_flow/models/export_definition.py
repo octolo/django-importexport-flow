@@ -13,6 +13,7 @@ from ..engine.core.validation import (
     annotation_aliases_for_definition,
     resolve_manager_to_queryset,
     validate_export_filter_fields,
+    validate_export_filter_manager_disjoint,
 )
 
 
@@ -48,6 +49,35 @@ class ExportDefinition(AuditMixin, models.Model):
         default="objects.all",
         verbose_name=_("Manager"),
         help_text=_("Default: objects.all"),
+    )
+    manager_kwargs_config = models.JSONField(
+        default=dict,
+        blank=True,
+        null=True,
+        verbose_name=_("Manager filter (static)"),
+        help_text=_(
+            "Static ORM kwargs merged via QuerySet.filter() immediately after the "
+            "manager path resolves, before filter_config / filter_request."
+        ),
+    )
+    manager_kwargs_request = models.JSONField(
+        default=dict,
+        blank=True,
+        null=True,
+        verbose_name=_("Manager request filters"),
+        help_text=_(
+            "Same shape as request filters: {query_param: orm_lookup}. Values come from "
+            "the export form as mg_get_<param> (optional unless listed in manager_kwargs_mandatory)."
+        ),
+    )
+    manager_kwargs_mandatory = models.JSONField(
+        default=dict,
+        blank=True,
+        null=True,
+        verbose_name=_("Manager mandatory filters"),
+        help_text=_(
+            "Same shape as mandatory filters (GET and/or kwargs). Form keys mg_get_* / mg_kw_*."
+        ),
     )
     order_by = models.JSONField(
         default=list,
@@ -90,16 +120,23 @@ class ExportDefinition(AuditMixin, models.Model):
             'kwargs). Example: {"kwargs": {"group_id": "group_id"}} for …/group/<group_id>/'
         ),
     )
-    annotation_columns = models.JSONField(
-        default=list,
-        blank=True,
+    max_relation_hops = models.PositiveIntegerField(
         null=True,
-        verbose_name=_("Queryset annotation names"),
+        blank=True,
+        verbose_name=_("Max relation hops"),
         help_text=_(
-            "JSON list of names added by ``QuerySet.annotate()`` on the export manager "
-            "(e.g. [\"book_count\"]). Used to validate ``order_by``, filters, and table "
-            "columns. You can also declare the same under table configuration "
-            "``annotation_columns`` / ``annotations``."
+            "Maximum depth when traversing relations for table columns. "
+            "Use 0 for top-level fields only. Leave empty for no limit."
+        ),
+    )
+    exclude_relations = models.ManyToManyField(
+        ContentType,
+        blank=True,
+        related_name="excluded_from_exports",
+        verbose_name=_("Exclude relations"),
+        help_text=_(
+            "Content types whose relations should never be traversed "
+            "when building export or import column paths (e.g. auth.User)."
         ),
     )
 
@@ -121,6 +158,7 @@ class ExportDefinition(AuditMixin, models.Model):
         model = self.target.model_class()
         if model is None:
             return
+        validate_export_filter_manager_disjoint(self)
         validate_export_filter_fields(
             model,
             self.filter_config,
@@ -128,6 +166,10 @@ class ExportDefinition(AuditMixin, models.Model):
             self.filter_mandatory,
             self.order_by,
             annotation_aliases=annotation_aliases_for_definition(self),
+            manager_kwargs_config=self.manager_kwargs_config,
+            manager_kwargs_request=self.manager_kwargs_request,
+            manager_kwargs_mandatory=self.manager_kwargs_mandatory,
+            strict_orm_keys_for_filters=False,
         )
         path = (self.manager or "").strip() or "objects.all"
         try:

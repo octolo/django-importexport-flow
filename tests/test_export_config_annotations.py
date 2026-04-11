@@ -1,4 +1,4 @@
-"""Export definitions: annotation_columns validate order_by; table columns are not schema-checked."""
+"""Export: annotation names in table ``configuration`` validate order_by; columns are not schema-checked."""
 
 from __future__ import annotations
 
@@ -61,17 +61,23 @@ def test_resolve_table_column_label_uses_configuration_override():
 
 
 @pytest.mark.django_db
-def test_export_definition_order_by_accepts_annotation_columns_field():
+def test_export_definition_order_by_accepts_annotation_from_table_configuration():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition(
+    definition = ExportDefinition.objects.create(
         name="Order by ann",
         target=ct,
         manager="objects",
         filter_config={},
-        order_by=["-book_count"],
-        annotation_columns=["book_count"],
+        order_by=[],
     )
+    ExportConfigTable.objects.create(
+        export=definition,
+        columns=["title"],
+        configuration={"annotation_columns": ["book_count"]},
+    )
+    definition.order_by = ["-book_count"]
     definition.full_clean()
+    definition.save(update_fields=["order_by"])
 
 
 @pytest.mark.django_db

@@ -271,13 +271,32 @@ def test_pdf_engine():
 
 
 @pytest.mark.django_db
-def test_core_engine_validates_filter_config_on_queryset_without_save():
-    """Unsaved definitions still go through the same ORM-key validation as model.clean()."""
+def test_core_engine_manager_kwargs_config_scopes_queryset():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition(
+    Book.objects.create(title="Small", pages=5)
+    big = Book.objects.create(title="Big", pages=20)
+    definition = ExportDefinition.objects.create(
+        name="Scoped by manager kwargs",
+        target=ct,
+        manager="objects.all",
+        manager_kwargs_config={"pages__gte": 10},
+        filter_config={},
+        filter_request={},
+        filter_mandatory={},
+    )
+    engine = CoreEngine(definition)
+    assert list(engine.get_queryset()) == [big]
+
+
+@pytest.mark.django_db
+def test_core_engine_validates_filter_config_on_queryset_without_save():
+    """Unsaved import definitions still get strict ORM-key validation like model.clean()."""
+    from django_importexport_flow.models import ImportDefinition
+
+    ct = ContentType.objects.get_for_model(Book)
+    definition = ImportDefinition(
         name="Draft",
         target=ct,
-        manager="objects",
         filter_config={"not_a_real_field": 1},
     )
     engine = CoreEngine(definition)
