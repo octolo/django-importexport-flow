@@ -11,6 +11,7 @@ import pandas as pd
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from ..engine.core.delegate import call_delegate, has_delegate
 from ..engine.core.export import (
     run_table_export,
     snapshot_export_filter_payload,
@@ -163,6 +164,8 @@ def process_export(
         data["export_format"] = export_format
     if "export_format" not in data:
         raise ValueError("export_format must be set in filter_payload or as export_format=…")
+    if has_delegate(definition):
+        return call_delegate(definition, data)
     return run_table_export(definition, data)
 
 
@@ -202,6 +205,20 @@ def process_import(
     )
 
     limit = max_bytes if max_bytes is not None else MAX_TABULAR_IMPORT_BYTES
+
+    if has_delegate(definition):
+        return call_delegate(
+            definition,
+            filter_payload,
+            file=file,
+            user=user,
+            related_object=related_object,
+            inferred_column_paths=inferred_column_paths,
+            preview_only=preview_only,
+            max_bytes=limit,
+            preview_row_limit=preview_row_limit,
+            run_async=run_async,
+        )
 
     if preview_only:
         return validate_import(

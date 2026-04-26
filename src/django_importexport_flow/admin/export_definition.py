@@ -63,6 +63,7 @@ class ExportDefinitionAdmin(AdminBoostModel):
                     "manager_kwargs_request",
                     "manager_kwargs_mandatory",
                     "order_by",
+                    "delegate_method",
                 )
             },
         ),

@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
 from namedid import NamedIDField
 
+from ..engine.core.delegate import resolve_delegate_method
 from ..engine.core.validation import (
     annotation_aliases_for_definition,
     validate_export_filter_fields,
@@ -50,6 +51,20 @@ class ImportDefinition(AuditMixin, models.Model):
         related_name="django_importexport_flow_import_targeted",
         verbose_name=_("Target content type"),
         help_text=_("Listed model."),
+    )
+    delegate_method = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("Delegate method"),
+        help_text=_(
+            "Optional dotted path resolved on the target model (e.g. "
+            '"objects.run_import" for Model.objects.run_import). When set, the '
+            "definition fully delegates to this callable, which receives every "
+            "concrete definition field plus the filter payload, the uploaded file "
+            "and the user as keyword arguments and must return the same dict shape "
+            "as process_import."
+        ),
     )
     order_by = models.JSONField(
         default=list,
@@ -169,6 +184,13 @@ class ImportDefinition(AuditMixin, models.Model):
             return
         model = self.target.model_class()
         if model is None:
+            return
+        delegate_path = (self.delegate_method or "").strip()
+        if delegate_path:
+            try:
+                resolve_delegate_method(model, delegate_path)
+            except ValidationError as exc:
+                raise ValidationError({"delegate_method": exc.messages})
             return
         validate_export_filter_fields(
             model,

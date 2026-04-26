@@ -214,7 +214,7 @@ class ImportDefinitionAdmin(AdminBoostModel):
         (None, {"fields": ("name", "named_id", "uuid", "description")}),
         (
             _("Model"),
-            {"fields": ("target", "order_by")},
+            {"fields": ("target", "order_by", "delegate_method")},
         ),
         (
             _("Filters"),

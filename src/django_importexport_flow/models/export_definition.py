@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
 from namedid import NamedIDField
 from ..managers import ExportManager
+from ..engine.core.delegate import resolve_delegate_method
 from ..engine.core.validation import (
     annotation_aliases_for_definition,
     resolve_manager_to_queryset,
@@ -49,6 +50,19 @@ class ExportDefinition(AuditMixin, models.Model):
         default="objects.all",
         verbose_name=_("Manager"),
         help_text=_("Default: objects.all"),
+    )
+    delegate_method = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("Delegate method"),
+        help_text=_(
+            "Optional dotted path resolved on the target model (e.g. "
+            '"objects.run_export" for Model.objects.run_export). When set, the '
+            "definition fully delegates to this callable, which receives every "
+            "concrete definition field plus the filter payload as keyword arguments "
+            "and must return (bytes, content_type, extension)."
+        ),
     )
     manager_kwargs_config = models.JSONField(
         default=dict,
@@ -157,6 +171,13 @@ class ExportDefinition(AuditMixin, models.Model):
             return
         model = self.target.model_class()
         if model is None:
+            return
+        delegate_path = (self.delegate_method or "").strip()
+        if delegate_path:
+            try:
+                resolve_delegate_method(model, delegate_path)
+            except ValidationError as exc:
+                raise ValidationError({"delegate_method": exc.messages})
             return
         validate_export_filter_manager_disjoint(self)
         validate_export_filter_fields(
