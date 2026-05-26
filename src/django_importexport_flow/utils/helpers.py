@@ -43,7 +43,15 @@ M2M_SLOT_PATH_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)\.(\d+)\.(.+)$")
 
 
 def _get_path_segment(current: Any, part: str) -> Any:
-    """One step: model attribute, ``dict`` key, or ``list`` / ``tuple`` index."""
+    """
+    One step: model attribute, ``dict`` key, or ``list`` / ``tuple`` index.
+
+    If the resolved attribute is a no-argument callable (e.g. ``get_status_display``,
+    ``get_category_display``, or any custom method), it is called automatically so that
+    column paths like ``model.get_status_display`` work without extra configuration.
+    Django manager / queryset descriptors (``RelatedManager``) are intentionally not
+    called even though they are callable.
+    """
     if current is None:
         return None
     if isinstance(current, dict):
@@ -54,7 +62,13 @@ def _get_path_segment(current: Any, part: str) -> Any:
             if 0 <= idx < len(current):
                 return current[idx]
         return None
-    return getattr(current, part, None)
+    value = getattr(current, part, None)
+    if callable(value) and not hasattr(value, "all"):
+        try:
+            value = value()
+        except TypeError:
+            pass
+    return value
 
 
 def get_value_from_path(obj: Any, path: str) -> Any:

@@ -19,6 +19,10 @@ class Author(models.Model):
         """Sample non-field path for export column validation tests."""
         return self.name.upper()
 
+    def get_display_name(self) -> str:
+        """Sample no-arg method to test callable column paths (e.g. ``author.get_display_name``)."""
+        return f"[{self.name}]"
+
 
 class AuthorProfile(models.Model):
     """Demonstrates ``OneToOneField`` (profile pattern)."""
