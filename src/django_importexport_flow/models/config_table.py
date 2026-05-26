@@ -41,7 +41,11 @@ class ExportConfigTable(models.Model):
             "ORM verbose name (annotations, unknown paths, …), you may set "
             "``<path>_label`` to the header text, e.g. "
             "``author.total_books_label`` for path ``author.total_books``; for expand "
-            "subfields, use ``<subfield>_label`` (e.g. ``pages_label``)."
+            "subfields, use ``<subfield>_label`` (e.g. ``pages_label``). "
+            "Excel only — ``split_by``: field path or column label used to split "
+            "the export into one worksheet per distinct value "
+            "(e.g. ``{\"split_by\": \"author__name\"}``). "
+            "Each sheet is named after the field value. Ignored for CSV and JSON."
         ),
     )
 

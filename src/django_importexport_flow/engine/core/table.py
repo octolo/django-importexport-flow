@@ -1,4 +1,5 @@
 import json
+import re
 from io import BytesIO, StringIO
 from typing import Any
 
@@ -17,6 +18,19 @@ from ...utils.helpers import (
     verbose_name_for_field_path,
 )
 from .engine import CoreEngine
+
+
+_EXCEL_INVALID_SHEET_RE = re.compile(r"[\\/*?:\[\]]")
+_EXCEL_MAX_SHEET_NAME = 31
+
+
+def _sanitize_excel_sheet_name(value: Any) -> str:
+    """Convert a field value to a valid Excel worksheet name (max 31 chars, no invalid chars)."""
+    if value is None:
+        return "_"
+    text = str(value)
+    text = _EXCEL_INVALID_SHEET_RE.sub("_", text)
+    return text[:_EXCEL_MAX_SHEET_NAME] or "_"
 
 
 def _format_cell_export_value(value: Any) -> Any:
@@ -253,19 +267,60 @@ class TableEngine(CoreEngine):
         self._tabular_export_dataframe().to_csv(buffer, index=False, sep=sep, **csv_opts)
         return buffer.getvalue().encode("utf-8")
 
+    def _resolve_split_by_column(self, df: "pd.DataFrame", split_by: str) -> str | None:
+        """
+        Return the DataFrame column label that corresponds to *split_by*.
+
+        *split_by* can be a verbatim column label already present in *df*, a dotted
+        field path (e.g. ``"author.name"``), or a Django ORM double-underscore path
+        (e.g. ``"author__name"`` — converted to ``"author.name"`` automatically).
+        Returns ``None`` when no match is found.
+        """
+        if split_by in df.columns:
+            return split_by
+        normalized = split_by.replace("__", ".")
+        for col in self._get_flat_columns():
+            data = col.get("data", "")
+            if (data == split_by or data == normalized) and col.get("label") in df.columns:
+                return col["label"]
+        return None
+
     def get_excel(self) -> bytes:
-        """Excel via :meth:`pandas.DataFrame.to_excel` (requires ``openpyxl`` for ``.xlsx``)."""
+        """
+        Excel via :meth:`pandas.DataFrame.to_excel` (requires ``openpyxl`` for ``.xlsx``).
+
+        When ``configuration.split_by`` is set to a field path or column label,
+        the export creates **one worksheet per distinct value** of that field instead of a
+        single sheet.  Each worksheet is named after the field value (invalid Excel
+        characters replaced with ``_``, truncated to 31 characters).  CSV and JSON
+        exports silently ignore ``split_by``.
+        """
         cfg = self.get_configuration() or {}
         excel_opts = (cfg.get("excel") or {}).copy()
         sheet_name = excel_opts.pop("sheet", excel_opts.pop("sheet_name", "Sheet1"))
+        split_by = cfg.get("split_by")
+
+        df = self._tabular_export_dataframe()
         buffer = BytesIO()
-        self._tabular_export_dataframe().to_excel(
-            buffer,
-            index=False,
-            sheet_name=sheet_name,
-            engine="openpyxl",
-            **excel_opts,
-        )
+
+        if split_by and not df.empty:
+            split_col = self._resolve_split_by_column(df, split_by)
+            if split_col is not None:
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    seen_names: dict[str, int] = {}
+                    for group_val, group_df in df.groupby(split_col, sort=False, dropna=False):
+                        base_name = _sanitize_excel_sheet_name(group_val)
+                        if base_name in seen_names:
+                            seen_names[base_name] += 1
+                            suffix = f"_{seen_names[base_name]}"
+                            tab_name = base_name[: _EXCEL_MAX_SHEET_NAME - len(suffix)] + suffix
+                        else:
+                            seen_names[base_name] = 0
+                            tab_name = base_name
+                        group_df.to_excel(writer, index=False, sheet_name=tab_name, **excel_opts)
+                return buffer.getvalue()
+
+        df.to_excel(buffer, index=False, sheet_name=sheet_name, engine="openpyxl", **excel_opts)
         return buffer.getvalue()
 
 
