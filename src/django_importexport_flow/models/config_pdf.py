@@ -31,7 +31,6 @@ class ExportConfigPdf(models.Model):
     class Meta:
         verbose_name = _("Export PDF configuration")
         verbose_name_plural = _("Export PDF configurations")
-        db_table = "django_reportimport_reportconfigpdf"
 
     def __str__(self) -> str:
         return _("PDF config for %(name)s") % {"name": self.export.name}

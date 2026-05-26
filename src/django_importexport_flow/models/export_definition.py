@@ -160,7 +160,6 @@ class ExportDefinition(AuditMixin, models.Model):
         ordering = ("name", "target")
         verbose_name = _("Export definition")
         verbose_name_plural = _("Export definitions")
-        db_table = "django_reportimport_reportdefinition"
 
     def __str__(self) -> str:
         return str(self.name)

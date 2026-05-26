@@ -169,8 +169,6 @@ class ImportDefinition(AuditMixin, models.Model):
     )
 
     class Meta:
-        # Historical table name (ex django-reporting); do not rename without a migration plan.
-        db_table = "django_reporting_reportimport"
         ordering = ("name", "target")
         verbose_name = _("Import definition")
         verbose_name_plural = _("Import definitions")

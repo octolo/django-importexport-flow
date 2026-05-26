@@ -92,8 +92,6 @@ class ImportRequest(AuditMixin, models.Model):
     )
 
     class Meta:
-        # Historical table name (ex django-reporting); do not rename without a migration plan.
-        db_table = "django_reporting_reportimportask"
         ordering = ("-created_at",)
         verbose_name = _("Import request")
         verbose_name_plural = _("Import requests")

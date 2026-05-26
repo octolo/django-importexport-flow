@@ -52,7 +52,6 @@ class ExportConfigTable(models.Model):
     class Meta:
         verbose_name = _("Export table configuration")
         verbose_name_plural = _("Export table configurations")
-        db_table = "django_reportimport_reportconfigtable"
 
     def __str__(self) -> str:
         return _("Table config for %(name)s") % {"name": self.export.name}

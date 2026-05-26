@@ -85,7 +85,6 @@ class ExportRequest(AuditMixin, models.Model):
         ordering = ("-created_at",)
         verbose_name = _("Export request")
         verbose_name_plural = _("Export requests")
-        db_table = "django_reportimport_reportrequest"
 
     def __str__(self) -> str:
         return f"{self.export_definition_id} · {self.get_status_display()} · {self.uuid}"
