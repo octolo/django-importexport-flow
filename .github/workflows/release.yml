@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "Django==5.2.*"
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: testpypi
+            repository_url: https://test.pypi.org/legacy/
+          - repository: pypi
+            repository_url: ""
+
+    steps:
+      - name: Download distributions
+        if: ${{ (matrix.repository == 'testpypi' && contains(github.ref_name, 'rc')) || (matrix.repository == 'pypi' && !contains(github.ref_name, 'rc')) }}
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Generate artifact attestation
+        if: ${{ (matrix.repository == 'testpypi' && contains(github.ref_name, 'rc')) || (matrix.repository == 'pypi' && !contains(github.ref_name, 'rc')) }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
+      - name: Publish to TestPyPI
+        if: ${{ matrix.repository == 'testpypi' && contains(github.ref_name, 'rc') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ matrix.repository_url }}
+
+      - name: Publish to PyPI
+        if: ${{ matrix.repository == 'pypi' && !contains(github.ref_name, 'rc') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
