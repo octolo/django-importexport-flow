@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Django 4.2+ (tested with Django 6.x)
+- Django 5.x
 - **django-boosted** — used by the bundled admin (`AdminBoostModel`, `admin_boost_view`)
 
 ## Install the package

@@ -1,0 +1,70 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: django-importexport-flow tests py${{ matrix.python_version }} Django ${{ matrix.django_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.10", "3.11", "3.12"]
+        django_version: ["5.0.*", "5.1.*", "5.2.*"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install "Django==${{ matrix.django_version }}"
+
+      - name: Django system check
+        run: python manage.py check
+
+      - name: Run tests
+        run: |
+          if find tests -name 'test*.py' -print -quit | grep -q .; then
+            python -m pytest
+          else
+            python manage.py check
+          fi
+
+  build:
+    name: Build django-importexport-flow
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "Django==5.2.*"
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*

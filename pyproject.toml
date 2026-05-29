@@ -24,11 +24,9 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Framework :: Django",
-    "Framework :: Django :: 3.2",
-    "Framework :: Django :: 4.0",
-    "Framework :: Django :: 4.1",
-    "Framework :: Django :: 4.2",
     "Framework :: Django :: 5.0",
+    "Framework :: Django :: 5.1",
+    "Framework :: Django :: 5.2",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -37,11 +35,12 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
 ]
 dependencies = [
-    "Django>=3.2",
+    "Django>=5.0,<6.0",
     "django-boosted>=1.0.0",
     "django-virtualqueryset>=1.0.0",
     "openpyxl>=3.1.5",
-    "pandas>=3.0.1",
+    "pandas>=2.3.3; python_version < '3.11'",
+    "pandas>=3.0.1; python_version >= '3.11'",
     "django-namedid>=0.2.0",
 ]
 
@@ -59,6 +58,7 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.0",
     "django-stubs>=5.0.0",
+    "django-extensions>=3.2.0",
     "weasyprint>=62.0",
 ]
 
