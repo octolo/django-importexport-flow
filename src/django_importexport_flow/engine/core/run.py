@@ -33,6 +33,8 @@ def create_import_request(
     relaunched_from: Any = None,
     inferred_column_paths: list[str] | None = None,
     related_object: Any | None = None,
+    trigger_processing: bool = False,
+    asynchronous: bool = False,
 ) -> Any:
     from django_importexport_flow.models import ImportRequest, ImportRequestRelatedObject
 
@@ -57,6 +59,10 @@ def create_import_request(
             import_request=ask,
             content_object=related_object,
         )
+    if trigger_processing:
+        from ...task import dispatch_import_request
+
+        dispatch_import_request(ask, asynchronous=asynchronous)
     return ask
 
 

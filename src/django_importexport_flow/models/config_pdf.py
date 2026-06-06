@@ -4,9 +4,10 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from .export_definition import ExportDefinition
+from .mixins import ProcessingBackendMixin
 
 
-class ExportConfigPdf(models.Model):
+class ExportConfigPdf(ProcessingBackendMixin, models.Model):
     export = models.OneToOneField(
         ExportDefinition,
         on_delete=models.CASCADE,

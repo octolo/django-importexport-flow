@@ -3,11 +3,32 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_boosted.models import AuditMixin
+
+
+def _export_output_storage():
+    """
+    Return the storage backend for ExportRequest.output_file.
+
+    Reads ``EXPORT_OUTPUT_STORAGE`` from ``DJANGO_IMPORTEXPORT_FLOW`` settings.
+    Defaults to Django's ``DEFAULT_FILE_STORAGE`` when not set.
+    Configure a private (non-web-accessible) backend in production.
+    """
+    from django.core.files.storage import default_storage
+
+    from ..utils.helpers import get_setting
+
+    path = get_setting("EXPORT_OUTPUT_STORAGE", None)
+    if not path:
+        return default_storage
+    from django.utils.module_loading import import_string
+
+    return import_string(path)()
 
 
 class ExportRequest(AuditMixin, models.Model):
@@ -17,6 +38,8 @@ class ExportRequest(AuditMixin, models.Model):
     """
 
     class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        PROCESSING = "processing", _("Processing")
         SUCCESS = "success", _("Success")
         FAILURE = "failure", _("Failure")
 
@@ -53,7 +76,15 @@ class ExportRequest(AuditMixin, models.Model):
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
+        default=Status.PENDING,
         verbose_name=_("Status"),
+    )
+    output_file = models.FileField(
+        upload_to="export_outputs/%Y/%m/",
+        storage=_export_output_storage,
+        blank=True,
+        verbose_name=_("Output file"),
+        help_text=_("Generated export file when status is success."),
     )
     output_bytes = models.PositiveIntegerField(
         null=True,
@@ -88,3 +119,17 @@ class ExportRequest(AuditMixin, models.Model):
 
     def __str__(self) -> str:
         return f"{self.export_definition_id} · {self.get_status_display()} · {self.uuid}"
+
+    def save(
+        self,
+        *args: Any,
+        trigger_processing: bool = False,
+        asynchronous: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().save(*args, **kwargs)
+        if not trigger_processing or self.status != self.Status.PENDING:
+            return
+        from ..task import dispatch_export_request
+
+        dispatch_export_request(self, asynchronous=asynchronous)

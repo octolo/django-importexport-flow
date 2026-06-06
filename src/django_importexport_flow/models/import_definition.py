@@ -15,9 +15,10 @@ from ..engine.core.validation import (
     validate_export_filter_fields,
     validate_import_match_fields,
 )
+from .mixins import ProcessingBackendMixin
 
 
-class ImportDefinition(AuditMixin, models.Model):
+class ImportDefinition(ProcessingBackendMixin, AuditMixin, models.Model):
     """
     Table-only report: target model + column exclusions on one row (no ExportConfigTable /
     ExportConfigPdf). Uses the default manager chain ``objects`` (see

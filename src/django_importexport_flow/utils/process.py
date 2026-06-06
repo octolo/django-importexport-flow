@@ -8,7 +8,6 @@ from io import BytesIO, StringIO
 from typing import Any
 
 import pandas as pd
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from ..engine.core.delegate import call_delegate, has_delegate
@@ -24,7 +23,6 @@ from ..engine.core.import_ import (
     sample_headers_for_import_definition,
     validate_import_preview,
 )
-from ..task import dispatch_import_request
 from ..forms import MAX_TABULAR_IMPORT_BYTES
 from ..models import ExportDefinition, ExportRequest, ImportDefinition, ImportRequest
 from ..utils.helpers import get_setting, normalize_table_column, resolve_table_column_label
@@ -235,8 +233,9 @@ def process_import(
         user,
         inferred_column_paths=inferred_column_paths,
         related_object=related_object,
+        trigger_processing=True,
+        asynchronous=run_async,
     )
-    dispatch_import_request(ask, asynchronous=run_async)
     ask.refresh_from_db()
     queued = ask.status == ImportRequest.Status.PROCESSING
     return {
@@ -306,63 +305,75 @@ def run_export_with_audit(
     user: Any | None,
 ) -> tuple[bytes, str, str]:
     """
-    Run :func:`process_export` with the same ``filter_payload``, and persist an
-    :class:`~django_importexport_flow.models.ExportRequest` (success or failure).
+    Run a table export and persist an :class:`~django_importexport_flow.models.ExportRequest`
+    audit row (success or failure).
 
-    Re-raises :exc:`~django.core.exceptions.ValidationError`, :exc:`ValueError`, or any
-    exception after recording the failure.
+    Both the **native** path and **custom backends** persist the result in
+    ``ExportRequest.output_file`` on success.  The original exception type is
+    preserved for the native path so callers (e.g. the admin) can distinguish
+    :exc:`~django.core.exceptions.ValidationError`, :exc:`ValueError`,
+    :exc:`OSError`, :exc:`MemoryError`, etc.
+
+    For a **custom backend**, the backend callable receives the
+    :class:`~django_importexport_flow.models.ExportRequest` instance (status
+    ``processing``) and is responsible for updating its status and writing to
+    ``output_file``.  A :exc:`RuntimeError` is raised when the backend leaves the
+    request in a non-success state.
     """
+    from ..apps import DjangoImportExportFlowConfig
+    from ..engine.core.processing import (
+        _build_er_filter_payload,
+        _finalize_native_export,
+        _mark_request_failure,
+        get_export_processing_config,
+        run_custom_processing,
+    )
+
     payload = snapshot_export_filter_payload(filter_payload)
     mgr_payload = snapshot_export_manager_kwargs_payload(filter_payload)
     export_fmt = str(filter_payload.get("export_format") or "")
-    try:
-        content, content_type, ext = process_export(
-            export_definition=export_definition,
-            filter_payload=filter_payload,
-        )
-    except (ValidationError, ValueError) as exc:
-        logger.warning(
-            "Table export validation failed for export definition %r: %s",
-            getattr(export_definition, "pk", None),
-            exc,
-        )
-        ExportRequest.objects.create(
-            export_definition=export_definition,
-            export_format=export_fmt,
-            filter_payload=payload,
-            manager_kwargs_payload=mgr_payload,
-            status=ExportRequest.Status.FAILURE,
-            error_trace=str(exc),
-            completed_at=timezone.now(),
-            initiated_by=user,
-        )
-        raise
-    except Exception:
-        logger.exception(
-            "Table export failed for export definition %r",
-            getattr(export_definition, "pk", None),
-        )
-        ExportRequest.objects.create(
-            export_definition=export_definition,
-            export_format=export_fmt,
-            filter_payload=payload,
-            manager_kwargs_payload=mgr_payload,
-            status=ExportRequest.Status.FAILURE,
-            error_trace=traceback.format_exc(),
-            completed_at=timezone.now(),
-            initiated_by=user,
-        )
-        raise
-    ExportRequest.objects.create(
+
+    er = ExportRequest(
         export_definition=export_definition,
         export_format=export_fmt,
         filter_payload=payload,
         manager_kwargs_payload=mgr_payload,
-        status=ExportRequest.Status.SUCCESS,
-        output_bytes=len(content),
-        completed_at=timezone.now(),
+        status=ExportRequest.Status.PROCESSING,
         initiated_by=user,
     )
+    er.save()
+
+    backend, kwargs = get_export_processing_config(export_definition)
+
+    if not backend:
+        # Native path — run in memory, persist output_file, re-raise original exception.
+        try:
+            content, content_type, ext = run_table_export(
+                export_definition, _build_er_filter_payload(er)
+            )
+        except Exception:
+            _mark_request_failure(er, traceback.format_exc())
+            raise
+        _finalize_native_export(er, content, ext)
+        return content, content_type, ext
+
+    # Custom backend path — backend owns the ExportRequest update.
+    target = export_definition.target.model_class() if export_definition.target_id else None
+    run_custom_processing(er, backend=backend, kwargs=kwargs, target_model=target)
+    er.refresh_from_db()
+
+    if er.status != ExportRequest.Status.SUCCESS:
+        raise RuntimeError(er.error_trace or "Export did not complete successfully.")
+
+    if not er.output_file:
+        raise RuntimeError(
+            "Custom export backend succeeded but did not write output_file."
+        )
+    content = er.output_file.read()
+    dispatch = DjangoImportExportFlowConfig.export_format_dispatch
+    if export_fmt not in dispatch:
+        raise ValueError(f"Unsupported export_format: {export_fmt!r}")
+    _method, content_type, ext = dispatch[export_fmt]
     return content, content_type, ext
 
 

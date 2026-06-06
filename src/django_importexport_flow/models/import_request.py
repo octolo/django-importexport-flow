@@ -99,6 +99,20 @@ class ImportRequest(AuditMixin, models.Model):
     def __str__(self) -> str:
         return f"{self.import_definition_id} · {self.get_status_display()} · {self.uuid}"
 
+    def save(
+        self,
+        *args: Any,
+        trigger_processing: bool = False,
+        asynchronous: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().save(*args, **kwargs)
+        if not trigger_processing or self.status != self.Status.PENDING:
+            return
+        from ..task import dispatch_import_request
+
+        dispatch_import_request(self, asynchronous=asynchronous)
+
     @classmethod
     def active_imports_for_object(cls, obj: Any) -> QuerySet[ImportRequest]:
         """

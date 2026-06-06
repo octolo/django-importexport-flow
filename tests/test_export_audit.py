@@ -38,6 +38,7 @@ def test_run_export_with_audit_success_creates_export_request(auditor_user):
     assert er.initiated_by_id == auditor_user.pk
     assert er.filter_payload.get("export_format") == "json"
     assert not er.error_trace
+    assert er.output_file
 
 
 @pytest.mark.django_db

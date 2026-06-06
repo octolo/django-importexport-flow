@@ -86,6 +86,18 @@ class Book(models.Model):
         verbose_name=_("Tags"),
     )
 
+    @classmethod
+    def mark_import_success(cls, request, **kwargs):
+        from tests.sample.processing_backends import mark_import_success
+
+        return mark_import_success(request, **kwargs)
+
+    @classmethod
+    def mark_export_success(cls, request, **kwargs):
+        from tests.sample.processing_backends import mark_export_success
+
+        return mark_export_success(request, **kwargs)
+
 
 class FieldShowcase(models.Model):
     """

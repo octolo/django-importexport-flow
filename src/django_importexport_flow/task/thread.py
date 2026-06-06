@@ -1,4 +1,4 @@
-"""Background import using a daemon thread (dev / light workloads)."""
+"""Background import/export using a daemon thread (dev / light workloads)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import threading
 
 from django.db import close_old_connections
 
-from django_importexport_flow.tasks import execute_import_request_by_uuid
+from django_importexport_flow.tasks import execute_export_request_by_uuid, execute_import_request_by_uuid
 
 
 class ThreadBackend:
@@ -19,4 +19,15 @@ class ThreadBackend:
                 close_old_connections()
 
         t = threading.Thread(target=_run, name=f"import-{import_request_uuid[:8]}", daemon=True)
+        t.start()
+
+    def enqueue_export(self, export_request_uuid: str) -> None:
+        def _run() -> None:
+            close_old_connections()
+            try:
+                execute_export_request_by_uuid(export_request_uuid)
+            finally:
+                close_old_connections()
+
+        t = threading.Thread(target=_run, name=f"export-{export_request_uuid[:8]}", daemon=True)
         t.start()

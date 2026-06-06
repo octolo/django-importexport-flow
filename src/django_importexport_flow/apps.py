@@ -24,8 +24,15 @@ class DjangoImportExportFlowConfig(AppConfig):
         "IMPORT_TASK_BACKEND": "sync",
         "IMPORT_ADMIN_OFFER_ASYNC": True,
         "IMPORT_ADMIN_ASYNC_DEFAULT": False,
+        "EXPORT_ADMIN_OFFER_ASYNC": True,
+        "EXPORT_ADMIN_ASYNC_DEFAULT": False,
         "IMPORT_PREVIEW_ROW_LIMIT": 30,
         "SERIALIZATION_FORMAT_VERSION": 1,
+        # Dotted path to a Django storage class used for ExportRequest.output_file.
+        # When None (default), Django's DEFAULT_FILE_STORAGE is used.
+        # Example: "storages.backends.s3boto3.S3Boto3Storage"
+        # Configure a private / non-web-accessible backend in production.
+        "EXPORT_OUTPUT_STORAGE": None,
     }
 
     #: Tabular export formats: ``export_format`` value → ``(TableEngine method, content-type, file extension)``.

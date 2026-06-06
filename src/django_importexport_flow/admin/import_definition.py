@@ -32,7 +32,6 @@ from ..engine.core.import_ import (
     create_import_request,
     read_import_filefield,
 )
-from ..task import dispatch_import_request
 from ..utils.process import generate_example_file, validate_import
 from ..utils.recoverable_errors import TABULAR_ENGINE_RECOVERABLE
 from ..utils.serialization import import_import_definition, serialize_import_definition
@@ -410,7 +409,7 @@ class ImportDefinitionAdmin(AdminBoostModel):
             get_setting("IMPORT_TASK_BACKEND", "sync") != "sync"
             and bool(cleaned.get("defer_to_task"))
         )
-        dispatch_import_request(ask, asynchronous=async_ok)
+        ask.save(trigger_processing=True, asynchronous=async_ok)
         ask.refresh_from_db()
 
         if ask.status == ImportRequest.Status.PROCESSING:
