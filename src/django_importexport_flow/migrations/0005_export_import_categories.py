@@ -527,7 +527,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="definition",
             constraint=models.CheckConstraint(
-                condition=models.Q(("direction__in", ["export", "import"])),
+                check=models.Q(("direction__in", ["export", "import"])),
                 name="definition_direction_valid",
             ),
         ),

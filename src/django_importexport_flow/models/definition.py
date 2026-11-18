@@ -160,7 +160,7 @@ class Definition(AuditMixin, models.Model):
         verbose_name_plural = _("Definitions")
         constraints = (
             models.CheckConstraint(
-                condition=Q(direction__in=["export", "import"]),
+                check=Q(direction__in=["export", "import"]),
                 name="definition_direction_valid",
             ),
             models.UniqueConstraint(

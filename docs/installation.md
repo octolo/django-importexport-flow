@@ -2,6 +2,7 @@
 
 ## Requirements
 
+- Python 3.11+
 - Django 5.x
 - **django-boosted** — used by the bundled admin (`AdminBoostModel`, `admin_boost_view`, `NestedStackedInline`)
 

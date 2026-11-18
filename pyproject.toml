@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [{ name = "Octolo", email = "dev@octolo.tech" }]
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = [
     "django",
     "reporting",
@@ -28,7 +28,6 @@ classifiers = [
     "Framework :: Django :: 5.1",
     "Framework :: Django :: 5.2",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -39,8 +38,7 @@ dependencies = [
     "django-boosted>=1.1.0",
     "django-virtualqueryset>=1.0.0",
     "openpyxl>=3.1.5",
-    "pandas>=2.3.3; python_version < '3.11'",
-    "pandas>=3.0.1; python_version >= '3.11'",
+    "pandas>=3.0.1",
     "django-namedid>=0.2.0",
 ]
 
@@ -92,7 +90,7 @@ skip_covered = false
 fail_under = 72
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = false
 plugins = ["mypy_django_plugin.main"]
 mypy_path = "src"

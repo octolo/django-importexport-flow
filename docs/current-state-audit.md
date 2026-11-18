@@ -77,7 +77,7 @@ These choices are intentional and must be configured for the environment:
 
 ## Quality and CI
 
-The matrix tests Python 3.10, 3.11, and 3.12 with Django 5.0, 5.1, and 5.2. It
+The matrix tests Python 3.11 and 3.12 with Django 5.0, 5.1, and 5.2. It
 runs `manage.py check` and pytest.
 
 The quality job, on Python 3.12 and Django 5.2, adds Ruff, the CI migration
