@@ -77,14 +77,18 @@ These choices are intentional and must be configured for the environment:
 
 ## Quality and CI
 
-The matrix tests Python 3.11 and 3.12 with Django 5.0, 5.1, and 5.2. It
+The matrix tests Python 3.11, 3.12, and 3.13 with Django 5.0, 5.1, and 5.2.
+Django 5.0 is skipped on Python 3.13, which it does not support. The matrix
 runs `manage.py check` and pytest.
 
 The quality job, on Python 3.12 and Django 5.2, adds Ruff, the CI migration
 check, `git diff --check`, coverage, Bandit, pip-audit, Vulture, Xenon, and
-mypy. The CodeQL workflow is separate: its syntax was checked locally, but its
-result is known only after the next GitHub Actions run. The build job, after
-the matrix, builds the package and runs `twine check`.
+mypy. A separate job installs the project without editable mode and checks
+that the admin templates are present. The CodeQL workflow is separate: its
+syntax was checked locally, but its result is known only after the next
+GitHub Actions run. The build job waits for the matrix, the quality job, and
+that install. It builds the package, runs `twine check`, and checks the wheel
+contents.
 
 CI mypy covers `src/django_importexport_flow`, migrations excluded.
 
@@ -134,8 +138,9 @@ used by Celery or django-rq.
 ```
 
 The script runs Django check, Ruff, pytest with coverage and strict warnings,
-Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, and Twine. Redirect the
-output yourself if you want a file. `makemigrations` is not part of that script.
+Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, Twine, and the wheel
+contents check. Redirect the output yourself if you want a file.
+`makemigrations` is not part of that script.
 
 Development command details are in [Development](development.md).
 

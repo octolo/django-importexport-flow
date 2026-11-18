@@ -16,8 +16,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python_version: ["3.11", "3.12"]
+        python_version: ["3.11", "3.12", "3.13"]
         django_version: ["5.0.*", "5.1.*", "5.2.*"]
+        exclude:
+          # Django 5.0 does not support Python 3.13.
+          - python_version: "3.13"
+            django_version: "5.0.*"
 
     steps:
       - name: Checkout repository
@@ -90,9 +94,49 @@ jobs:
       - name: Type check
         run: mypy src/django_importexport_flow
 
+  install:
+    name: Non-editable install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from the local project, not editable
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+
+          import django_importexport_flow
+          from django_importexport_flow.apps import DjangoImportExportFlowConfig
+
+          root = Path(django_importexport_flow.__file__).resolve().parent
+          required = (
+              root / "templates/django_importexport_flow/admin/report_import_import_data.html",
+              root / "templates/django_importexport_flow/admin/report_import_import_confirm.html",
+          )
+          missing = [str(path) for path in required if not path.is_file()]
+          if missing:
+              raise SystemExit("installed package is missing: " + ", ".join(missing))
+          installed = version("django-importexport-flow")
+          if installed == "0.0.0":
+              raise SystemExit("package metadata was not installed")
+          print(installed, DjangoImportExportFlowConfig.name)
+          PY
+
   build:
     name: Build django-importexport-flow
-    needs: tests
+    needs: [tests, quality, install]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -113,3 +157,4 @@ jobs:
           python -m pip install build twine
           python -m build
           python -m twine check dist/*
+          python .github/scripts/check-wheel-contents.py dist/*.whl

@@ -29,6 +29,7 @@ jobs:
           python -m pip install build twine
           python -m build
           python -m twine check dist/*
+          python .github/scripts/check-wheel-contents.py dist/*.whl
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4

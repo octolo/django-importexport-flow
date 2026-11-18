@@ -138,6 +138,17 @@ else
   failures+=("Distribution validation (package build produced no files)")
 fi
 
+wheels=("$BUILD_DIR"/*.whl)
+if [[ -e "${wheels[0]}" ]]; then
+  run_check \
+    "Wheel contents" \
+    "$PYTHON_BIN" \
+    "$ROOT_DIR/.github/scripts/check-wheel-contents.py" \
+    "${wheels[@]}"
+else
+  failures+=("Wheel contents (package build produced no wheel)")
+fi
+
 printf '\n## Summary\n\n'
 if ((${#failures[@]} == 0)); then
   printf 'All checks passed.\n'

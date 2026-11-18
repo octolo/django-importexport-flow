@@ -33,7 +33,8 @@ mypy src/django_importexport_flow
 ```
 
 To run a full local audit (check, Ruff, pytest with coverage and strict
-warnings, Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, Twine):
+warnings, Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, Twine, and
+the wheel contents check):
 
 ```bash
 ./audit.sh
