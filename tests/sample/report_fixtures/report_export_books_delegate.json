@@ -1,0 +1,93 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "9fbb37e3-7013-4767-b93e-9a6a4b02469d",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.412Z",
+        "updated_at": "2026-11-17T13:51:20.412Z",
+        "direction": "export",
+        "name": "Sample fixture — Books (delegate export)",
+        "named_id": "sample-fixture-books-delegate-export",
+        "description": "CSV export of book titles.",
+        "target": [
+          "sample",
+          "book"
+        ],
+        "manager": "objects",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 19,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title"
+        ],
+        "definition": "9fbb37e3-7013-4767-b93e-9a6a4b02469d",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 27,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 19,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 28,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 19,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 20,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title"
+        ],
+        "definition": "9fbb37e3-7013-4767-b93e-9a6a4b02469d",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 29,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 20,
+        "format_key": "json",
+        "template": ""
+      }
+    }
+  ]
+}

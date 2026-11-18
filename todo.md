@@ -1,20 +1,11 @@
 # Backlog — django-importexport-flow
 
----
+## Remaining work
 
-## Reste à faire
+### Tests
 
-### CI
+- **Load / concurrency** (optional): parallel imports or exports and large files are not covered.
 
-- **Pipeline CI** (ex. GitHub Actions) : `pytest`, `ruff`, `mypy`. Pas de `.github/workflows` ni équivalent dans le dépôt. Config locale OK dans `pyproject.toml`.
+## Suggested order
 
-### Tests manquants
-
-- **Charge / concurrence** (optionnel) : imports ou exports parallèles, gros fichiers — non couvert.
-
----
-
-## Ordre de travail suggéré
-
-1. CI sur le dépôt.
-2. Tests de charge (optionnel).
+1. Load tests (optional).

@@ -7,7 +7,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
-from django_importexport_flow.models import ImportDefinition
+from django_importexport_flow.models import Definition
 from django_importexport_flow.utils.lookup import get_import_definition_by_uuid_or_named_id
 from django_importexport_flow.utils.process import generate_example_file
 from django_importexport_flow.utils.recoverable_errors import TABULAR_ENGINE_RECOVERABLE
@@ -49,7 +49,7 @@ class Command(BaseCommand):
 
         try:
             definition = get_import_definition_by_uuid_or_named_id(definition_id)
-        except (ValueError, ImportDefinition.DoesNotExist) as exc:
+        except (ValueError, Definition.DoesNotExist) as exc:
             raise CommandError(str(exc)) from exc
 
         try:

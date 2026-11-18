@@ -26,7 +26,7 @@ def test_xls_requires_ole_magic():
 
 
 def test_csv_accepts_utf8_text():
-    validate_tabular_upload_bytes("a,b\n1,2".encode(), "data.csv")
+    validate_tabular_upload_bytes(b"a,b\n1,2", "data.csv")
 
 
 def test_configuration_payload_requires_objects():
@@ -44,7 +44,7 @@ def test_configuration_payload_requires_objects():
             "format_version": 1,
             "objects": [
                 {
-                    "model": "django_importexport_flow.exportdefinition",
+                    "model": "django_importexport_flow.definition",
                     "pk": "00000000-0000-0000-0000-000000000001",
                     "fields": {"name": "X"},
                 }

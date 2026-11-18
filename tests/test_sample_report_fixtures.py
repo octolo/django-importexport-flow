@@ -16,10 +16,13 @@ def _load(name: str) -> dict:
 
 def test_sample_report_export_books_fixture():
     data = _load("report_export_books.json")
-    assert data["format_version"] == 1
+    assert data["format_version"] == 2
     cols = None
     for o in data["objects"]:
-        if o["model"] == "django_importexport_flow.exportconfigtable":
+        if (
+            o["model"] == "django_importexport_flow.categoryconfig"
+            and o["fields"]["category_key"] == "spreadsheet"
+        ):
             cols = o["fields"]["columns"]
             break
     assert cols == ["title", "pages", "price", "metadata", "author.name"]
@@ -27,10 +30,13 @@ def test_sample_report_export_books_fixture():
 
 def test_sample_report_export_authors_fixture():
     data = _load("report_export_authors.json")
-    assert data["format_version"] == 1
+    assert data["format_version"] == 2
     cols = None
     for o in data["objects"]:
-        if o["model"] == "django_importexport_flow.exportconfigtable":
+        if (
+            o["model"] == "django_importexport_flow.categoryconfig"
+            and o["fields"]["category_key"] == "spreadsheet"
+        ):
             cols = o["fields"]["columns"]
             break
     assert cols[0] == "name"
@@ -40,13 +46,13 @@ def test_sample_report_export_authors_fixture():
 
 @pytest.mark.django_db
 def test_sample_fixtures_import_roundtrip():
-    """Hand-maintained fixtures use target=null; import still deserializes."""
-    from django_importexport_flow.models import ExportDefinition
+    """Definition JSON uses natural content-type keys and still deserializes."""
+    from django_importexport_flow.models import Definition
     from django_importexport_flow.utils.serialization import import_export_configuration
 
     for name in ("report_export_books.json", "report_export_authors.json"):
         data = _load(name)
-        ExportDefinition.objects.filter(name__startswith="Sample fixture —").delete()
+        Definition.objects.filter(name__startswith="Sample fixture —").delete()
         obj = import_export_configuration(data)
         assert obj.name.startswith("Sample fixture —")
-        ExportDefinition.objects.filter(pk=obj.pk).delete()
+        Definition.objects.filter(pk=obj.pk).delete()

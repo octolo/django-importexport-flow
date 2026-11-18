@@ -1,0 +1,83 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "55522936-6631-4e9d-ad1c-5a3f5d879cf3",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.444Z",
+        "updated_at": "2026-11-17T13:51:20.444Z",
+        "direction": "import",
+        "name": "Sample fixture — Import books (match title)",
+        "named_id": "sample-fixture-import-books-match-title",
+        "description": "match_fields updates the existing book instead of inserting a second row.",
+        "target": [
+          "sample",
+          "book"
+        ],
+        "manager": "objects.all",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [
+          "price",
+          "metadata",
+          "publication_date",
+          "recorded_at",
+          "author.name",
+          "author.profile.bio",
+          "tags.0.name",
+          "tags.0.importance",
+          "tags.0.category.name",
+          "tags.1.name",
+          "tags.1.importance",
+          "tags.1.category.name"
+        ],
+        "exclude_primary_key": true,
+        "match_fields": [
+          "title"
+        ],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 25,
+      "fields": {
+        "configuration": {},
+        "columns": [],
+        "definition": "55522936-6631-4e9d-ad1c-5a3f5d879cf3",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 36,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 25,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 37,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 25,
+        "format_key": "excel",
+        "template": ""
+      }
+    }
+  ]
+}

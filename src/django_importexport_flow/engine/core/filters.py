@@ -62,7 +62,9 @@ def attach_filter_context_fields(
             continue
         in_man = param_name in mgr_get_m
         fname = form_field_name_for_manager_query_param(param_name)
-        field_help = req_label if in_man else _("Optional — leave empty to skip this manager filter.")
+        field_help = (
+            req_label if in_man else _("Optional — leave empty to skip this manager filter.")
+        )
         form.fields[fname] = forms.CharField(
             label=_("Manager GET “%(param)s” → %(field)s")
             % {"param": param_name, "field": orm_field},

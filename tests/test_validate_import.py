@@ -8,13 +8,14 @@ import pandas as pd
 import pytest
 from django.contrib.contenttypes.models import ContentType
 
-from django_importexport_flow.models import ImportDefinition
+from django_importexport_flow.models import Definition
 from django_importexport_flow.utils.process import (
     generate_example_file,
     process_import,
     validate_import,
 )
 from tests.sample.models import Book
+from tests.support import attach_import_spreadsheet
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 IMPORT_BOOK_CSV = FIXTURES / "import_book.csv"
@@ -23,11 +24,13 @@ IMPORT_BOOK_CSV = FIXTURES / "import_book.csv"
 @pytest.mark.django_db
 def test_validate_import_builds_validation_dataset():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Books import",
         target=ct,
         filter_config={},
     )
+    attach_import_spreadsheet(definition)
     with IMPORT_BOOK_CSV.open("rb") as f:
         out = validate_import(file=f, import_definition=definition, row_limit=5)
 
@@ -47,11 +50,13 @@ def test_validate_import_builds_validation_dataset():
 @pytest.mark.django_db
 def test_process_import_preview_only_includes_validation_dataset():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Books import",
         target=ct,
         filter_config={},
     )
+    attach_import_spreadsheet(definition)
     with IMPORT_BOOK_CSV.open("rb") as f:
         prev = process_import(
             file=f,
@@ -67,11 +72,13 @@ def test_process_import_preview_only_includes_validation_dataset():
 @pytest.mark.django_db
 def test_validate_import_accepts_dataframe():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Books import",
         target=ct,
         filter_config={},
     )
+    attach_import_spreadsheet(definition)
     df = pd.read_csv(IMPORT_BOOK_CSV)
     out = validate_import(dataframe=df, import_definition=definition, row_limit=5)
     assert out["errors"] == []
@@ -81,11 +88,13 @@ def test_validate_import_accepts_dataframe():
 @pytest.mark.django_db
 def test_generate_example_file_csv_json_excel():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Ex",
         target=ct,
         filter_config={},
     )
+    attach_import_spreadsheet(definition)
     for fmt in ("csv", "json", "excel"):
         body, ct_hdr, ext = generate_example_file(definition, example_format=fmt)
         assert body
@@ -96,7 +105,8 @@ def test_generate_example_file_csv_json_excel():
 @pytest.mark.django_db
 def test_validate_import_empty_rows_when_errors():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Bad target",
         target=ct,
         columns_exclude=[
@@ -110,6 +120,7 @@ def test_validate_import_empty_rows_when_errors():
         ],
         filter_config={},
     )
+    attach_import_spreadsheet(definition)
     with IMPORT_BOOK_CSV.open("rb") as f:
         out = validate_import(file=f, import_definition=definition)
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from functools import cached_property as functools_cached_property
-from typing import Any, Collection
+from typing import Any
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import FieldDoesNotExist, ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.db.models import ManyToManyField
 from django.utils.translation import gettext_lazy as _
@@ -30,7 +31,7 @@ def annotation_column_aliases_from_config(configuration: Any) -> frozenset[str]:
     """
     Column names supplied by ``QuerySet.annotate()`` (or alias/extra output) that
     are not ``Meta`` fields and not detectable on the model class. Declared on
-    ``ExportConfigTable.configuration`` or ``ImportDefinition.configuration``
+    a category ``configuration`` or ``ImportDefinition.configuration``
     under ``annotation_columns``, ``annotated_columns``, or ``annotations``:
     each value is a JSON list of strings (merged).
 
@@ -47,29 +48,35 @@ def annotation_column_aliases_from_config(configuration: Any) -> frozenset[str]:
     return frozenset(names)
 
 
-def _export_table_configuration_for_aliases(definition: Any) -> dict[str, Any] | None:
-    """``ExportConfigTable.configuration`` when ``definition`` is an export with a table row."""
+def _category_configurations(definition: Any) -> list[dict[str, Any]]:
+    """Common configuration dicts of the tabular categories attached to ``definition``."""
+    found: list[dict[str, Any]] = []
+    related = getattr(definition, "category_configs", None)
+    if related is None:
+        return found
     try:
-        ct = definition.config_table
-    except Exception:
-        return None
-    cfg = getattr(ct, "configuration", None)
-    return cfg if isinstance(cfg, dict) else None
+        categories = related.all()
+    except (ObjectDoesNotExist, AttributeError):
+        return found
+    for category in categories:
+        if getattr(category, "category_key", None) not in {"spreadsheet", "structured_data"}:
+            continue
+        configuration = getattr(category, "configuration", None)
+        if isinstance(configuration, dict):
+            found.append(configuration)
+    return found
 
 
 def annotation_aliases_for_definition(definition: Any) -> frozenset[str]:
     """
-    Annotation / alias names for filter and ``order_by`` validation:
+    Annotation / alias names for filter and ``order_by`` validation.
 
-    * **Import** — lists under :attr:`~django_importexport_flow.models.ImportDefinition.configuration`
-      (``annotation_columns``, ``annotated_columns``, ``annotations``).
-    * **Export** — same keys under :class:`~django_importexport_flow.models.ExportConfigTable`
-      ``configuration`` only (queryset shape stays on :class:`~django_importexport_flow.models.ExportDefinition`).
+    Import definitions declare them on ``configuration``. Export definitions declare
+    them on the spreadsheet and structured-data category configurations.
     """
     merged = annotation_column_aliases_from_config(getattr(definition, "configuration", None))
-    merged = merged | annotation_column_aliases_from_config(
-        _export_table_configuration_for_aliases(definition)
-    )
+    for configuration in _category_configurations(definition):
+        merged = merged | annotation_column_aliases_from_config(configuration)
     return merged
 
 
@@ -82,10 +89,13 @@ def is_non_field_reader_on_model(model_cls: type[models.Model], name: str) -> bo
     """
     if get_field_or_accessor(model_cls, name) is not None:
         return False
+    cached_property_type: type | None
     try:
-        from django.utils.functional import cached_property as django_cached_property_cls
+        from django.utils.functional import cached_property as imported_cached_property
     except ImportError:  # pragma: no cover
-        django_cached_property_cls = None
+        cached_property_type = None
+    else:
+        cached_property_type = imported_cached_property
     for cls in model_cls.__mro__:
         if name not in cls.__dict__:
             continue
@@ -94,9 +104,7 @@ def is_non_field_reader_on_model(model_cls: type[models.Model], name: str) -> bo
             return True
         if isinstance(val, functools_cached_property):
             return True
-        if django_cached_property_cls is not None and isinstance(
-            val, django_cached_property_cls
-        ):
+        if cached_property_type is not None and isinstance(val, cached_property_type):
             return True
     return False
 
@@ -115,14 +123,10 @@ def split_filter_mandatory(mandatory: dict[str, Any]) -> tuple[dict[str, Any], d
     if "get" not in mandatory and "kwargs" not in mandatory:
         return dict(mandatory), {}
     get_m = mandatory.get("get")
-    if get_m is None:
-        get_m = {}
-    elif not isinstance(get_m, dict):
+    if get_m is None or not isinstance(get_m, dict):
         get_m = {}
     kw_map = mandatory.get("kwargs")
-    if kw_map is None:
-        kw_map = {}
-    elif not isinstance(kw_map, dict):
+    if kw_map is None or not isinstance(kw_map, dict):
         kw_map = {}
     return get_m, kw_map
 
@@ -192,52 +196,37 @@ def validate_import_match_fields(
     if names in (None, []):
         return
     if not isinstance(names, list):
-        raise ValidationError(
-            {"match_fields": _("Must be a list of field name strings.")}
-        )
+        raise ValidationError({"match_fields": _("Must be a list of field name strings.")})
     seen: set[str] = set()
     for raw in names:
         if not isinstance(raw, str) or not raw.strip():
-            raise ValidationError(
-                {"match_fields": _("Each entry must be a non-empty field name.")}
-            )
+            raise ValidationError({"match_fields": _("Each entry must be a non-empty field name.")})
         name = raw.strip()
         if name in seen:
             raise ValidationError(
-                {
-                    "match_fields": _(
-                        "Duplicate field %(name)s in match keys."
-                    )
-                    % {"name": name}
-                }
+                {"match_fields": _("Duplicate field %(name)s in match keys.") % {"name": name}}
             )
         seen.add(name)
         if "." in name:
             raise ValidationError(
                 {
-                    "match_fields": _(
-                        "%(name)s: use a single model field name, not a path."
-                    )
+                    "match_fields": _("%(name)s: use a single model field name, not a path.")
                     % {"name": name}
                 }
             )
         try:
             field = model._meta.get_field(name)
-        except Exception:
+        except FieldDoesNotExist as exc:
             raise ValidationError(
                 {
-                    "match_fields": _(
-                        "%(name)s is not a field on %(model)s."
-                    )
+                    "match_fields": _("%(name)s is not a field on %(model)s.")
                     % {"name": name, "model": model.__name__}
                 }
-            )
+            ) from exc
         if isinstance(field, ManyToManyField) or getattr(field, "many_to_many", False):
             raise ValidationError(
                 {
-                    "match_fields": _(
-                        "%(name)s: many-to-many fields cannot be used as match keys."
-                    )
+                    "match_fields": _("%(name)s: many-to-many fields cannot be used as match keys.")
                     % {"name": name}
                 }
             )
@@ -313,7 +302,7 @@ def coerce_request_filter_value(model: type[models.Model], orm_key: str, raw: st
             return raw
     try:
         return field.to_python(raw)
-    except Exception as exc:
+    except (TypeError, ValueError, ValidationError) as exc:
         raise ValidationError(
             _("Invalid filter value %(value)r for %(lookup)s: %(err)s")
             % {"value": raw, "lookup": orm_key, "err": exc}
@@ -340,6 +329,23 @@ def validate_filter_request_mandatory_get_overlap(
             )
 
 
+def _require_optional_map(value: Any, message: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValidationError(message)
+    return value
+
+
+def _validate_orm_lookup_values(
+    model: type[models.Model],
+    values: Any,
+    annotation_aliases: Collection[str] | None,
+) -> None:
+    for orm_key in values:
+        validate_filter_kwargs_for_model(model, {orm_key: 1}, annotation_aliases=annotation_aliases)
+
+
 def validate_filter_mandatory_for_model(
     model: type[models.Model],
     mandatory: Any,
@@ -358,38 +364,28 @@ def validate_filter_mandatory_for_model(
         return
     if not isinstance(mandatory, dict):
         raise ValidationError(_("filter_mandatory must be a JSON object."))
+    shorthand = "get" not in mandatory and "kwargs" not in mandatory
     if not strict_orm_keys:
-        if "get" not in mandatory and "kwargs" not in mandatory:
+        if shorthand:
             return
-        get_map = mandatory.get("get")
-        if get_map is not None and not isinstance(get_map, dict):
-            raise ValidationError(_("filter_mandatory.get must be an object."))
-        kw_map = mandatory.get("kwargs")
-        if kw_map is not None and not isinstance(kw_map, dict):
-            raise ValidationError(_("filter_mandatory.kwargs must be an object."))
+        _require_optional_map(mandatory.get("get"), _("filter_mandatory.get must be an object."))
+        _require_optional_map(
+            mandatory.get("kwargs"), _("filter_mandatory.kwargs must be an object.")
+        )
         return
-    if "get" not in mandatory and "kwargs" not in mandatory:
-        for _param, orm_key in mandatory.items():
-            validate_filter_kwargs_for_model(
-                model, {orm_key: 1}, annotation_aliases=annotation_aliases
-            )
+    if shorthand:
+        _validate_orm_lookup_values(model, mandatory.values(), annotation_aliases)
         return
-    get_map = mandatory.get("get")
+    get_map = _require_optional_map(
+        mandatory.get("get"), _("filter_mandatory.get must be an object.")
+    )
     if get_map is not None:
-        if not isinstance(get_map, dict):
-            raise ValidationError(_("filter_mandatory.get must be an object."))
-        for _param, orm_key in get_map.items():
-            validate_filter_kwargs_for_model(
-                model, {orm_key: 1}, annotation_aliases=annotation_aliases
-            )
-    kw_map = mandatory.get("kwargs")
+        _validate_orm_lookup_values(model, get_map.values(), annotation_aliases)
+    kw_map = _require_optional_map(
+        mandatory.get("kwargs"), _("filter_mandatory.kwargs must be an object.")
+    )
     if kw_map is not None:
-        if not isinstance(kw_map, dict):
-            raise ValidationError(_("filter_mandatory.kwargs must be an object."))
-        for _url_name, orm_key in kw_map.items():
-            validate_filter_kwargs_for_model(
-                model, {orm_key: 1}, annotation_aliases=annotation_aliases
-            )
+        _validate_orm_lookup_values(model, kw_map.values(), annotation_aliases)
 
 
 def validate_order_by_for_model(
@@ -461,7 +457,7 @@ def validate_export_filter_fields(
             raise ValidationError(_("filter_request must be a JSON object."))
     fr, _fr_mand, _fr_get, _fr_kw = parse_filter_maps(filter_request, filter_mandatory)
     if strict_orm_keys_for_filters:
-        for _param, orm_key in fr.items():
+        for orm_key in fr.values():
             validate_filter_kwargs_for_model(
                 model, {orm_key: 1}, annotation_aliases=annotation_aliases
             )
@@ -473,41 +469,65 @@ def validate_export_filter_fields(
         strict_orm_keys=strict_orm_keys_for_filters,
     )
     validate_order_by_for_model(model, order_by, annotation_aliases=annotation_aliases)
+    _validate_manager_kwargs(
+        model,
+        annotation_aliases=annotation_aliases,
+        manager_kwargs_config=manager_kwargs_config,
+        manager_kwargs_request=manager_kwargs_request,
+        manager_kwargs_mandatory=manager_kwargs_mandatory,
+        strict_orm_keys_for_filters=strict_orm_keys_for_filters,
+    )
+
+
+def _validate_manager_kwargs(
+    model: type[models.Model],
+    *,
+    annotation_aliases: Collection[str] | None,
+    manager_kwargs_config: Any,
+    manager_kwargs_request: Any,
+    manager_kwargs_mandatory: Any,
+    strict_orm_keys_for_filters: bool,
+) -> None:
     if (
-        manager_kwargs_config is not None
-        or manager_kwargs_request is not None
-        or manager_kwargs_mandatory is not None
+        manager_kwargs_config is None
+        and manager_kwargs_request is None
+        and manager_kwargs_mandatory is None
     ):
-        if strict_orm_keys_for_filters:
+        return
+    _require_loose_object(
+        manager_kwargs_config,
+        _("manager_kwargs_config must be a JSON object."),
+        strict_orm_keys_for_filters,
+    )
+    _require_loose_object(
+        manager_kwargs_request,
+        _("manager_kwargs_request must be a JSON object."),
+        strict_orm_keys_for_filters,
+    )
+    if strict_orm_keys_for_filters:
+        validate_filter_kwargs_for_model(
+            model, manager_kwargs_config or {}, annotation_aliases=annotation_aliases
+        )
+        mapped, _mandatory, _get, _kw = parse_filter_maps(
+            manager_kwargs_request, manager_kwargs_mandatory
+        )
+        for orm_key in mapped.values():
             validate_filter_kwargs_for_model(
-                model, manager_kwargs_config or {}, annotation_aliases=annotation_aliases
+                model, {orm_key: 1}, annotation_aliases=annotation_aliases
             )
-        elif manager_kwargs_config not in (None, {}) and not isinstance(
-            manager_kwargs_config, dict
-        ):
-            raise ValidationError(_("manager_kwargs_config must be a JSON object."))
-        if not strict_orm_keys_for_filters and manager_kwargs_request not in (
-            None,
-            {},
-        ) and not isinstance(manager_kwargs_request, dict):
-            raise ValidationError(_("manager_kwargs_request must be a JSON object."))
-        mgr_fr, _mgr_mand, _mgr_get, _mgr_kw = parse_filter_maps(
-            manager_kwargs_request, manager_kwargs_mandatory
-        )
-        if strict_orm_keys_for_filters:
-            for _param, orm_key in mgr_fr.items():
-                validate_filter_kwargs_for_model(
-                    model, {orm_key: 1}, annotation_aliases=annotation_aliases
-                )
-        validate_filter_request_mandatory_get_overlap(
-            manager_kwargs_request, manager_kwargs_mandatory
-        )
-        validate_filter_mandatory_for_model(
-            model,
-            manager_kwargs_mandatory,
-            annotation_aliases=annotation_aliases,
-            strict_orm_keys=strict_orm_keys_for_filters,
-        )
+    validate_filter_request_mandatory_get_overlap(manager_kwargs_request, manager_kwargs_mandatory)
+    validate_filter_mandatory_for_model(
+        model,
+        manager_kwargs_mandatory,
+        annotation_aliases=annotation_aliases,
+        strict_orm_keys=strict_orm_keys_for_filters,
+    )
+
+
+def _require_loose_object(value: Any, message: Any, strict: bool) -> None:
+    if strict or value in (None, {}) or isinstance(value, dict):
+        return
+    raise ValidationError(message)
 
 
 def resolve_manager_to_queryset(model: type[models.Model], manager_path: str) -> Any:

@@ -1,36 +1,71 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "objects": [
     {
-      "model": "django_importexport_flow.exportdefinition",
-      "pk": "2e836eaa-d65c-41a6-8b94-0ae657dd670e",
+      "model": "django_importexport_flow.definition",
+      "pk": "13254f99-eab3-4c76-8fea-558ae12d99ea",
       "fields": {
         "created_by": null,
         "updated_by": null,
-        "created_at": "2026-03-29T21:47:30.335Z",
-        "updated_at": "2026-03-29T21:47:30.335Z",
+        "created_at": "2026-11-17T13:51:20.373Z",
+        "updated_at": "2026-11-17T13:51:20.373Z",
+        "direction": "export",
         "name": "Sample fixture — Books (all rows)",
-        "description": "Lists every Book with title, pages, price, metadata, and author.name.",
-        "target": 15,
+        "named_id": "sample-fixture-books-all-rows",
+        "description": "Columns, static filter_config, optional filter_request, mandatory GET, and a PDF template.",
+        "target": [
+          "sample",
+          "book"
+        ],
         "manager": "objects",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
         "order_by": [],
-        "filter_config": {},
-        "filter_request": {},
-        "filter_mandatory": {}
+        "filter_config": {
+          "price__gte": 0
+        },
+        "filter_request": {
+          "before": "recorded_at__lt"
+        },
+        "filter_mandatory": {
+          "get": {
+            "min_pages": "pages__gte"
+          }
+        },
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
       }
     },
     {
-      "model": "django_importexport_flow.exportconfigpdf",
-      "pk": "2e836eaa-d65c-41a6-8b94-0ae657dd670e",
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 3,
       "fields": {
-        "template": "",
-        "configuration": {}
+        "configuration": {},
+        "columns": [],
+        "definition": "13254f99-eab3-4c76-8fea-558ae12d99ea",
+        "category_key": "document"
       }
     },
     {
-      "model": "django_importexport_flow.exportconfigtable",
-      "pk": "2e836eaa-d65c-41a6-8b94-0ae657dd670e",
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 4,
       "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 3,
+        "format_key": "pdf",
+        "template": "<ul>{% for obj in object_list %}<li>{{ obj.title }}</li>{% endfor %}</ul>"
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 1,
+      "fields": {
+        "configuration": {},
         "columns": [
           "title",
           "pages",
@@ -38,14 +73,61 @@
           "metadata",
           "author.name"
         ],
+        "definition": "13254f99-eab3-4c76-8fea-558ae12d99ea",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 1,
+      "fields": {
         "configuration": {
-          "csv": {
-            "delimiter": ";"
-          },
-          "excel": {
-            "sheet": "Books"
-          }
-        }
+          "delimiter": ";"
+        },
+        "hook": [],
+        "category_config": 1,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 2,
+      "fields": {
+        "configuration": {
+          "sheet": "Books"
+        },
+        "hook": [],
+        "category_config": 1,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 2,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title",
+          "pages",
+          "price",
+          "metadata",
+          "author.name"
+        ],
+        "definition": "13254f99-eab3-4c76-8fea-558ae12d99ea",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 3,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 2,
+        "format_key": "json",
+        "template": ""
       }
     }
   ]

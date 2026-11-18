@@ -7,16 +7,9 @@ from io import BytesIO
 import pandas as pd
 from django.utils.translation import gettext_lazy as _
 
-from ...utils.upload_validation import validate_tabular_upload_bytes
+from ...utils.upload_validation import looks_like_json_start, validate_tabular_upload_bytes
 
 _EXCEL_SUFFIXES = (".xlsx", ".xls")
-
-
-def _looks_like_json_payload(raw: bytes) -> bool:
-    if not raw:
-        return False
-    first = raw.lstrip()[:1]
-    return first in (b"[", b"{")
 
 
 def read_tabular_dataframe_from_bytes(raw: bytes, name: str, max_bytes: int) -> pd.DataFrame:
@@ -37,7 +30,7 @@ def read_tabular_dataframe_from_bytes(raw: bytes, name: str, max_bytes: int) -> 
     if lowered.endswith(_EXCEL_SUFFIXES):
         return pd.read_excel(buf)
 
-    if _looks_like_json_payload(raw):
+    if looks_like_json_start(raw):
         raise ValueError(_("JSON import is not supported yet; use CSV or Excel."))
 
     try:

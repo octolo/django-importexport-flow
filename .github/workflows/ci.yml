@@ -45,6 +45,51 @@ jobs:
             python manage.py check
           fi
 
+  quality:
+    name: quality py3.12 Django 5.2
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install "Django==5.2.*"
+
+      - name: Ruff
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Django checks
+        run: |
+          python manage.py check
+          python manage.py makemigrations --check
+          git diff --check
+
+      - name: Tests with coverage
+        run: python -m pytest --cov=django_importexport_flow --cov-branch --cov-report=term
+
+      - name: Security and complexity
+        run: |
+          bandit -r src/django_importexport_flow -x src/django_importexport_flow/migrations -ll -ii
+          pip-audit .
+          vulture src/django_importexport_flow --min-confidence 90 --exclude '*/migrations/*'
+          xenon src/django_importexport_flow --exclude '*/migrations/*' --max-absolute C --max-modules B --max-average A
+
+      - name: Type check
+        run: mypy src/django_importexport_flow
+
   build:
     name: Build django-importexport-flow
     needs: tests

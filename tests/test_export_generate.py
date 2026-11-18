@@ -3,23 +3,42 @@ import json
 import pytest
 from django.contrib.contenttypes.models import ContentType
 
-from django_importexport_flow.engine.core.export import DefinitionFilterProxy, run_table_export
-from django_importexport_flow.forms import make_export_form_class
-from django_importexport_flow.models import ExportConfigTable, ExportDefinition
+from django_importexport_flow.engine.core.export import (
+    DefinitionFilterProxy,
+    run_pdf_export,
+    run_table_export,
+)
+from django_importexport_flow.forms import export_format_choices, make_export_form_class
+from tests.support import attach_pdf_export, attach_tabular_export
+
+
+def _format_keys(choices) -> list[str]:
+    keys: list[str] = []
+    for item in choices:
+        group = item[1]
+        if isinstance(group, (list, tuple)) and group and isinstance(group[0], (list, tuple)):
+            keys.extend(key for key, _label in group)
+        else:
+            keys.append(item[0])
+    return keys
+
+
+from django_importexport_flow.models import Definition
 from tests.sample.models import Book
 
 
 @pytest.mark.django_db
 def test_export_form_filter_request_and_queryset():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Exp",
         target=ct,
         manager="objects",
         filter_config={"pages": 0},
         filter_request={"p": "title"},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -43,14 +62,15 @@ def test_export_form_filter_request_and_queryset():
 def test_export_form_filter_request_only_is_optional():
     """filter_request GET params are optional; empty skips that filter in the engine."""
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Exp opt",
         target=ct,
         manager="objects",
         filter_config={"pages": 0},
         filter_request={"p": "title"},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -69,7 +89,8 @@ def test_export_form_filter_request_only_is_optional():
 def test_export_form_accepts_filter_mandatory_shorthand_flat_get_map():
     """filter_mandatory without get/kwargs keys: whole dict is mandatory GET params."""
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Shorthand man",
         target=ct,
         manager="objects",
@@ -77,7 +98,7 @@ def test_export_form_accepts_filter_mandatory_shorthand_flat_get_map():
         filter_request={},
         filter_mandatory={"author_id": "pages"},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -89,7 +110,8 @@ def test_export_form_accepts_filter_mandatory_shorthand_flat_get_map():
 @pytest.mark.django_db
 def test_export_form_mandatory_get_same_field_name_as_request():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Man only",
         target=ct,
         manager="objects",
@@ -97,7 +119,7 @@ def test_export_form_mandatory_get_same_field_name_as_request():
         filter_request={},
         filter_mandatory={"get": {"n": "pages"}},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -112,7 +134,8 @@ def test_export_form_mandatory_get_same_field_name_as_request():
 @pytest.mark.django_db
 def test_definition_filter_proxy_merges_config():
     ct = ContentType.objects.get_for_model(Book)
-    d = ExportDefinition.objects.create(
+    d = Definition.objects.create(
+        direction="export",
         name="P",
         target=ct,
         manager="objects",
@@ -122,3 +145,78 @@ def test_definition_filter_proxy_merges_config():
     p = DefinitionFilterProxy(d, {"pages": 1, "title": "x"})
     assert p.filter_config == {"pages": 1, "title": "x"}
     assert p.name == "P"
+
+
+@pytest.mark.django_db
+def test_export_form_offers_pdf_when_a_template_is_set():
+    ct = ContentType.objects.get_for_model(Book)
+    definition = Definition.objects.create(
+        direction="export",
+        name="PDF choice",
+        target=ct,
+        manager="objects",
+    )
+    attach_tabular_export(export=definition, columns=["title"], configuration={})
+    assert _format_keys(export_format_choices(definition)) == ["csv", "excel", "json"]
+    attach_pdf_export(
+        export=definition,
+        template="<p>{{ object_list|length }}</p>",
+    )
+    definition = Definition.objects.get(pk=definition.pk)
+    FormClass = make_export_form_class(definition)
+    assert _format_keys(FormClass().fields["export_format"].choices) == [
+        "pdf",
+        "csv",
+        "excel",
+        "json",
+    ]
+    Book.objects.create(title="A", pages=1)
+    form = FormClass({"export_format": "pdf"})
+    assert form.is_valid(), form.errors
+    body, content_type, ext = run_pdf_export(definition, form.cleaned_data)
+    assert content_type == "application/pdf"
+    assert ext == ".pdf"
+    assert body.startswith(b"%PDF")
+
+
+@pytest.mark.django_db
+def test_export_form_hides_template_until_pdf_is_enabled():
+    ct = ContentType.objects.get_for_model(Book)
+    definition = Definition.objects.create(
+        direction="export", name="No PDF", target=ct, manager="objects"
+    )
+    attach_tabular_export(export=definition, columns=["title"], configuration={})
+    form = make_export_form_class(definition)()
+    assert "template_override" not in form.fields
+    assert "configuration_overrides" in form.fields
+
+
+@pytest.mark.django_db
+def test_export_form_validates_request_overrides():
+    ct = ContentType.objects.get_for_model(Book)
+    definition = Definition.objects.create(
+        direction="export", name="Override form", target=ct, manager="objects"
+    )
+    attach_tabular_export(export=definition, columns=["title"], configuration={})
+    attach_pdf_export(export=definition, template="<p>stored</p>")
+    FormClass = make_export_form_class(definition, allow_template_override=True)
+    rejected = FormClass(
+        {
+            "export_format": "csv",
+            "template_override": "<p>company</p>",
+            "configuration_overrides": '{"format": {"delimiter": ";"}}',
+        }
+    )
+    assert not rejected.is_valid()
+    assert "template_override" in rejected.errors
+
+    accepted = FormClass(
+        {
+            "export_format": "csv",
+            "template_override": "",
+            "configuration_overrides": '{"format": {"delimiter": ";"}, "hook": {"company_id": 1}}',
+        }
+    )
+    assert accepted.is_valid(), accepted.errors
+    assert accepted.cleaned_data["configuration_overrides"]["format"] == {"delimiter": ";"}
+    assert accepted.cleaned_data["template_override"] == ""

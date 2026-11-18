@@ -16,11 +16,23 @@ pytest
 
 Tests use **`tests.settings`** (SQLite file in the repo) and **`django_boosted`** as an installed app.
 
-## Lint
+## Lint and quality
 
 ```bash
 ruff check src tests
+ruff format --check src tests
+python manage.py check
+python manage.py makemigrations --check
+pytest --cov=django_importexport_flow --cov-branch --cov-report=term-missing
+bandit -r src/django_importexport_flow -x src/django_importexport_flow/migrations -ll -ii
+pip-audit .
+vulture src/django_importexport_flow --min-confidence 90 --exclude '*/migrations/*'
+radon cc src/django_importexport_flow -s -a -e '*/migrations/*'
+xenon src/django_importexport_flow --exclude '*/migrations/*' --max-absolute C --max-modules B --max-average A
+mypy src/django_importexport_flow
 ```
+
+The coverage gate is **72%** branch-aware coverage (`fail_under` in `pyproject.toml`). The measured result on 18 November 2026 is **77.24%** across **231** tests. The same run stays clean when resource warnings, unraisable exceptions, and unordered pagination warnings are treated as errors. Mypy covers the whole package, migrations excluded. See [current-state audit](current-state-audit.md).
 
 ## Package layout
 

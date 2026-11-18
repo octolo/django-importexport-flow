@@ -9,6 +9,9 @@ django-importexport-flow/
 │   │   │   ├── table.py       # TableEngine — CSV / Excel / JSON rows
 │   │   │   ├── pdf.py         # PdfEngine — HTML → PDF (WeasyPrint)
 │   │   │   ├── export.py      # run_table_export, filter payload helpers
+│   │   │   ├── hooks.py       # Format hook chain (native or configured list)
+│   │   │   ├── overrides.py   # Request template and allowed configuration overrides
+│   │   │   ├── processing.py  # ImportRequest / ExportRequest through that chain
 │   │   │   ├── filters.py     # Dynamic filter fields for forms / CLI
 │   │   │   ├── validation.py  # Filter maps, column specs, manager path
 │   │   │   ├── tabular.py     # CSV/Excel bytes → pandas DataFrame
@@ -21,13 +24,14 @@ django-importexport-flow/
 │   │   ├── csv.py | excel.py | json.py | pdf.py   # Thin aliases to core.table / core.pdf
 │   │   └── __init__.py        # Lazy exports (CoreEngine, TableEngine, …)
 │   ├── models/
-│   │   ├── related_object.py    # BaseRequestRelatedObject, Import/ExportRequestRelatedObject
-│   │   ├── export_definition.py
-│   │   ├── import_definition.py
-│   │   ├── export_request.py | import_request.py
-│   │   ├── config_table.py | config_pdf.py
-│   │   └── data_preview.py
-│   ├── admin/                 # ExportDefinition, ImportDefinition, requests, JSON config import
+│   │   ├── definition.py        # Definition + export/import proxies
+│   │   ├── category.py          # CategoryConfig + category proxies
+│   │   ├── format.py            # FormatConfig + format proxies
+│   │   ├── request.py           # ImportRequest, ExportRequest, related objects
+│   │   ├── translation.py       # ColumnTranslation
+│   │   ├── mixins.py
+│   │   └── preview.py           # abstract in-memory preview rows
+│   ├── admin/                 # definition, category, format, request, translation, mixins, preview
 │   ├── task/                  # IMPORT_TASK_BACKEND (sync, thread, celery, rq)
 │   ├── tasks.py               # execute_import_request_by_uuid (+ optional Celery task)
 │   ├── management/commands/   # process_export, process_import, generate_example_file
@@ -58,8 +62,9 @@ Implementation lives in short modules next to it:
 
 ## Export side
 
-- **`ExportConfigTable.columns`**: list of column strings (JSON), same path vocabulary as imports where applicable.
+- **`CategoryConfig.columns`**: list of column strings (JSON), same path vocabulary as imports where applicable.
 - **Engines**: **`CoreEngine`** builds the queryset; **`TableEngine`** / **`PdfEngine`** add tabular or PDF output.
+- **Hooks**: each format runs its native hook, or the ordered list stored on **`FormatConfig.hook`** when that list is not empty. Stored options live in **`FormatConfig.configuration`**. An **`ExportRequest`** may supply `template_override` and `configuration_overrides` for that run only: request values win over the stored format configuration. Sync, thread, Celery, and RQ backends only decide when the same pipeline runs.
 
 See [filters-and-export.md](filters-and-export.md) and [import-data.md](import-data.md).
 

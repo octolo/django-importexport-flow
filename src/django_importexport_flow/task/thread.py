@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import threading
 
-from django.db import close_old_connections
+from django.db import close_old_connections, connections
 
-from django_importexport_flow.tasks import execute_export_request_by_uuid, execute_import_request_by_uuid
+from django_importexport_flow.tasks import (
+    execute_export_request_by_uuid,
+    execute_import_request_by_uuid,
+)
 
 
 class ThreadBackend:
@@ -16,7 +19,7 @@ class ThreadBackend:
             try:
                 execute_import_request_by_uuid(import_request_uuid)
             finally:
-                close_old_connections()
+                connections.close_all()
 
         t = threading.Thread(target=_run, name=f"import-{import_request_uuid[:8]}", daemon=True)
         t.start()
@@ -27,7 +30,7 @@ class ThreadBackend:
             try:
                 execute_export_request_by_uuid(export_request_uuid)
             finally:
-                close_old_connections()
+                connections.close_all()
 
         t = threading.Thread(target=_run, name=f"export-{export_request_uuid[:8]}", daemon=True)
         t.start()

@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
 from django_importexport_flow.forms import MAX_TABULAR_IMPORT_BYTES
-from django_importexport_flow.models import ImportDefinition
+from django_importexport_flow.models import Definition
 from django_importexport_flow.utils.process import process_import, validate_import
 from django_importexport_flow.utils.recoverable_errors import TABULAR_ENGINE_RECOVERABLE
 
@@ -20,7 +20,7 @@ from ._filter_cli import load_filter_payload_dict
 
 # Expected failures for CLI: translate to CommandError; everything else propagates (use --traceback).
 _RECOVERABLE_IMPORT_ERRORS: tuple[type[BaseException], ...] = TABULAR_ENGINE_RECOVERABLE + (
-    ImportDefinition.DoesNotExist,
+    Definition.DoesNotExist,
 )
 
 
@@ -46,6 +46,49 @@ def _upload_buffer_from_path(path_str: str, max_bytes: int | None) -> BytesIO:
     buf = BytesIO(raw)
     buf.name = str(path)
     return buf
+
+
+def _filter_payload_from_options(options: dict[str, Any]) -> dict[str, Any]:
+    if options["validate"] and options["preview"]:
+        raise CommandError("Use either --preview or --validate, not both.")
+
+    filter_json = options["filter_json"]
+    filter_json_file = options["filter_json_file"]
+    if filter_json_file and filter_json is not None and str(filter_json).strip():
+        raise CommandError("Use only one of --filter-json and --filter-json-file.")
+
+    try:
+        payload = load_filter_payload_dict(
+            filter_json=filter_json,
+            filter_json_file=filter_json_file,
+        )
+    except (json.JSONDecodeError, OSError) as exc:
+        raise CommandError(str(exc)) from exc
+
+    if not isinstance(payload, dict):
+        raise CommandError("Filter JSON must be a JSON object.")
+    return payload
+
+
+def _initiated_by_user(username: str | None, *, preview: bool):
+    if not username or preview:
+        return None
+    User = get_user_model()
+    user = User.objects.filter(username=username).first()
+    if user is None:
+        raise CommandError(f"No user with username {username!r}.")
+    return user
+
+
+def _call_import(operation, *, memory_message: str):
+    try:
+        return operation()
+    except CommandError:
+        raise
+    except MemoryError as exc:
+        raise CommandError(memory_message) from exc
+    except _RECOVERABLE_IMPORT_ERRORS as exc:
+        raise CommandError(str(exc)) from exc
 
 
 class Command(BaseCommand):
@@ -121,101 +164,30 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
-        if options["validate"] and options["preview"]:
-            raise CommandError("Use either --preview or --validate, not both.")
-
-        filter_json = options["filter_json"]
-        filter_json_file = options["filter_json_file"]
-        if filter_json_file and filter_json is not None and str(filter_json).strip():
-            raise CommandError("Use only one of --filter-json and --filter-json-file.")
-
-        try:
-            payload = load_filter_payload_dict(
-                filter_json=filter_json,
-                filter_json_file=filter_json_file,
-            )
-        except (json.JSONDecodeError, OSError) as exc:
-            raise CommandError(str(exc)) from exc
-
-        if not isinstance(payload, dict):
-            raise CommandError("Filter JSON must be a JSON object.")
-
-        user = None
-        username = options["username"]
-        if username and not options["preview"]:
-            User = get_user_model()
-            user = User.objects.filter(username=username).first()
-            if user is None:
-                raise CommandError(f"No user with username {username!r}.")
-
+        payload = _filter_payload_from_options(options)
+        user = _initiated_by_user(options["username"], preview=bool(options["preview"]))
         path = options["file"]
         cols = options["columns"]
         inferred = list(cols) if cols else None
         max_bytes = options["max_bytes"]
         definition_key = options["definition"]
+        run_async = bool(options.get("run_async"))
 
         if options["validate"]:
-            if not sys.stdin.isatty():
-                raise CommandError(
-                    "--validate requires an interactive terminal (stdin must be a TTY)."
-                )
-            try:
-                upload_buf = _upload_buffer_from_path(path, max_bytes)
-                v = validate_import(
-                    file=upload_buf,
-                    import_definition_key=definition_key,
-                    max_bytes=max_bytes,
-                )
-            except CommandError:
-                raise
-            except MemoryError as exc:
-                raise CommandError(
-                    "Not enough memory to read or validate the import file."
-                ) from exc
-            except _RECOVERABLE_IMPORT_ERRORS as exc:
-                raise CommandError(str(exc)) from exc
-
-            self._print_import_validation(v)
-            errs = v.get("errors") or []
-            if errs:
-                raise CommandError("Validation failed; fix errors above before importing.")
-            answer = input("Continue with import? [y/N]: ").strip().lower()
-            if answer not in ("y", "yes"):
-                self.stdout.write("Aborted.")
-                return
-            upload_buf.seek(0)
-            try:
-                result = process_import(
-                    file=upload_buf,
-                    import_definition_key=definition_key,
-                    user=user,
-                    filter_payload=payload,
-                    inferred_column_paths=inferred,
-                    preview_only=False,
-                    max_bytes=max_bytes,
-                    run_async=bool(options.get("run_async")),
-                )
-            except CommandError:
-                raise
-            except MemoryError as exc:
-                raise CommandError("Not enough memory to complete the import.") from exc
-            except _RECOVERABLE_IMPORT_ERRORS as exc:
-                raise CommandError(str(exc)) from exc
-
-            ask = result["import_request"]
-            ok = result["success"]
-            q = result.get("queued")
-            line = f"ImportRequest {ask.uuid} status={ask.status!r} success={ok}"
-            if q:
-                line += " queued=True"
-                self.stdout.write(self.style.WARNING(line))
-            else:
-                self.stdout.write((self.style.SUCCESS if ok else self.style.WARNING)(line))
+            self._import_after_prompt(
+                path=path,
+                max_bytes=max_bytes,
+                definition_key=definition_key,
+                user=user,
+                payload=payload,
+                inferred=inferred,
+                run_async=run_async,
+            )
             return
 
-        try:
+        def _run_from_path():
             with open(path, "rb") as upload:
-                result = process_import(
+                return process_import(
                     file=upload,
                     import_definition_key=definition_key,
                     user=user,
@@ -223,28 +195,78 @@ class Command(BaseCommand):
                     inferred_column_paths=inferred,
                     preview_only=bool(options["preview"]),
                     max_bytes=max_bytes,
-                    run_async=bool(options.get("run_async")),
+                    run_async=run_async,
                 )
-        except CommandError:
-            raise
-        except MemoryError as exc:
-            raise CommandError("Not enough memory to complete the import.") from exc
-        except _RECOVERABLE_IMPORT_ERRORS as exc:
-            raise CommandError(str(exc)) from exc
 
+        result = _call_import(
+            _run_from_path,
+            memory_message="Not enough memory to complete the import.",
+        )
         if options["preview"]:
             self._print_import_validation(result)
             return
+        self._write_import_request_outcome(result)
 
+    def _import_after_prompt(
+        self,
+        *,
+        path: str,
+        max_bytes: int | None,
+        definition_key: str,
+        user: Any,
+        payload: dict[str, Any],
+        inferred: list[str] | None,
+        run_async: bool,
+    ) -> None:
+        if not sys.stdin.isatty():
+            raise CommandError("--validate requires an interactive terminal (stdin must be a TTY).")
+
+        def _validate():
+            upload_buf = _upload_buffer_from_path(path, max_bytes)
+            report = validate_import(
+                file=upload_buf,
+                import_definition_key=definition_key,
+                max_bytes=max_bytes,
+            )
+            return upload_buf, report
+
+        upload_buf, report = _call_import(
+            _validate,
+            memory_message="Not enough memory to read or validate the import file.",
+        )
+        self._print_import_validation(report)
+        if report.get("errors"):
+            raise CommandError("Validation failed; fix errors above before importing.")
+        answer = input("Continue with import? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            self.stdout.write("Aborted.")
+            return
+        upload_buf.seek(0)
+        result = _call_import(
+            lambda: process_import(
+                file=upload_buf,
+                import_definition_key=definition_key,
+                user=user,
+                filter_payload=payload,
+                inferred_column_paths=inferred,
+                preview_only=False,
+                max_bytes=max_bytes,
+                run_async=run_async,
+            ),
+            memory_message="Not enough memory to complete the import.",
+        )
+        self._write_import_request_outcome(result)
+
+    def _write_import_request_outcome(self, result: dict[str, Any]) -> None:
         ask = result["import_request"]
         ok = result["success"]
-        q = result.get("queued")
+        queued = result.get("queued")
         line = f"ImportRequest {ask.uuid} status={ask.status!r} success={ok}"
-        if q:
+        if queued:
             line += " queued=True"
             self.stdout.write(self.style.WARNING(line))
-        else:
-            self.stdout.write((self.style.SUCCESS if ok else self.style.WARNING)(line))
+            return
+        self.stdout.write((self.style.SUCCESS if ok else self.style.WARNING)(line))
 
     def _print_import_validation(self, result: dict[str, Any]) -> None:
         """Shared output for validate_import and process_import(..., preview_only=True)."""

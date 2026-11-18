@@ -1,0 +1,86 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "7a467595-e432-47bf-8d61-9ac692c40dd0",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.448Z",
+        "updated_at": "2026-11-17T13:51:20.448Z",
+        "direction": "import",
+        "name": "Sample fixture — Import showcase scalars",
+        "named_id": "sample-fixture-import-showcase-scalars",
+        "description": "Representative scalar field types (text, int, bool, date, uuid, json, ip).",
+        "target": [
+          "sample",
+          "fieldshowcase"
+        ],
+        "manager": "objects.all",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [
+          "text_f",
+          "slug_f",
+          "url_f",
+          "bigint_f",
+          "smallint_f",
+          "posint_f",
+          "possmall_f",
+          "posbigint_f",
+          "float_f",
+          "decimal_f",
+          "bool_null_f",
+          "datetime_f",
+          "time_f",
+          "duration_f",
+          "binary_f",
+          "file_f",
+          "fk_author"
+        ],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": 0,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 28,
+      "fields": {
+        "configuration": {},
+        "columns": [],
+        "definition": "7a467595-e432-47bf-8d61-9ac692c40dd0",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 42,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 28,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 43,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 28,
+        "format_key": "excel",
+        "template": ""
+      }
+    }
+  ]
+}

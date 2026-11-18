@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import posixpath
+import zipfile
+from io import BytesIO
 from typing import Any
 
 from django.utils.translation import gettext_lazy as _
@@ -18,66 +21,51 @@ def _is_ole_head(raw: bytes) -> bool:
     return len(raw) >= 8 and raw[:8] == _OLE_MAGIC
 
 
-def _looks_like_json_start(raw: bytes) -> bool:
+def looks_like_json_start(raw: bytes) -> bool:
     if not raw:
         return False
     first = raw.lstrip()[:1]
     return first in (b"[", b"{")
 
 
-def validate_tabular_upload_bytes(raw: bytes, filename: str) -> None:
-    """
-    Ensure bytes match the declared (or implied) tabular type: Excel magic for ``.xlsx`` /
-    ``.xls``, UTF-8 text for CSV paths; reject obvious type/extension mismatches.
-    """
-    if not raw:
-        raise ValueError(str(_("The file is empty.")))
-    lowered = (filename or "").lower()
+def _require_xlsx_bytes(raw: bytes) -> None:
+    if not _is_zip_head(raw):
+        raise ValueError(
+            str(_("File content is not a valid Excel .xlsx document (expected a ZIP archive)."))
+        )
+    _validate_xlsx_archive(raw)
 
-    if lowered.endswith(".json"):
+
+def _require_xls_bytes(raw: bytes) -> None:
+    if _is_ole_head(raw):
         return
+    raise ValueError(
+        str(_("File content is not a valid Excel .xls document (expected OLE compound file)."))
+    )
 
-    if lowered.endswith(".xlsx"):
-        if not _is_zip_head(raw):
-            raise ValueError(
-                str(_("File content is not a valid Excel .xlsx document (expected a ZIP archive)."))
-            )
-        return
 
-    if lowered.endswith(".xls"):
-        if not _is_ole_head(raw):
-            raise ValueError(
-                str(
-                    _(
-                        "File content is not a valid Excel .xls document (expected OLE compound file)."
-                    )
+def _require_csv_bytes(raw: bytes) -> None:
+    if _is_zip_head(raw):
+        raise ValueError(
+            str(
+                _(
+                    "This file looks like Excel (.xlsx), not CSV. Upload it as .xlsx or export as CSV."
                 )
             )
-        return
-
-    if lowered.endswith(".csv"):
-        if _is_zip_head(raw):
-            raise ValueError(
-                str(
-                    _(
-                        "This file looks like Excel (.xlsx), not CSV. Upload it as .xlsx or export as CSV."
-                    )
-                )
+        )
+    if _is_ole_head(raw):
+        raise ValueError(
+            str(
+                _("This file looks like Excel (.xls), not CSV. Upload it as .xls or export as CSV.")
             )
-        if _is_ole_head(raw):
-            raise ValueError(
-                str(
-                    _(
-                        "This file looks like Excel (.xls), not CSV. Upload it as .xls or export as CSV."
-                    )
-                )
-            )
-        try:
-            raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError(str(_("The CSV file must be UTF-8 encoded."))) from exc
-        return
+        )
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(str(_("The CSV file must be UTF-8 encoded."))) from exc
 
+
+def _require_undeclared_tabular_bytes(raw: bytes) -> None:
     if _is_zip_head(raw):
         raise ValueError(
             str(
@@ -94,13 +82,67 @@ def validate_tabular_upload_bytes(raw: bytes, filename: str) -> None:
                 )
             )
         )
-    if _looks_like_json_start(raw):
+    if looks_like_json_start(raw):
         return
-
     try:
         raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(str(_("The file must be UTF-8 encoded text (CSV)."))) from exc
+
+
+def validate_tabular_upload_bytes(raw: bytes, filename: str) -> None:
+    """
+    Ensure bytes match the declared (or implied) tabular type: Excel magic for ``.xlsx`` /
+    ``.xls``, UTF-8 text for CSV paths; reject obvious type/extension mismatches.
+    """
+    if not raw:
+        raise ValueError(str(_("The file is empty.")))
+    lowered = (filename or "").lower()
+    if lowered.endswith(".json"):
+        return
+    if lowered.endswith(".xlsx"):
+        _require_xlsx_bytes(raw)
+        return
+    if lowered.endswith(".xls"):
+        _require_xls_bytes(raw)
+        return
+    if lowered.endswith(".csv"):
+        _require_csv_bytes(raw)
+        return
+    _require_undeclared_tabular_bytes(raw)
+
+
+def _validate_xlsx_archive(raw: bytes) -> None:
+    """Reject oversized, highly compressed, or path-traversing spreadsheet archives."""
+    from .helpers import get_setting
+
+    max_members = int(get_setting("MAX_XLSX_ARCHIVE_MEMBERS"))
+    max_uncompressed = int(get_setting("MAX_XLSX_UNCOMPRESSED_BYTES"))
+    max_ratio = int(get_setting("MAX_XLSX_COMPRESSION_RATIO"))
+    try:
+        archive = zipfile.ZipFile(BytesIO(raw))
+    except zipfile.BadZipFile as exc:
+        raise ValueError(str(_("File content is not a valid Excel .xlsx document."))) from exc
+    with archive:
+        _validate_xlsx_members(archive, max_members, max_uncompressed, max_ratio)
+
+
+def _validate_xlsx_members(
+    archive, max_members: int, max_uncompressed: int, max_ratio: int
+) -> None:
+    infos = archive.infolist()
+    if len(infos) > max_members:
+        raise ValueError(str(_("The Excel file contains too many archive entries.")))
+    total = 0
+    for info in infos:
+        name = info.filename.replace("\\", "/")
+        if posixpath.isabs(name) or ".." in posixpath.normpath(name).split("/"):
+            raise ValueError(str(_("The Excel file contains an unsafe archive path.")))
+        total += info.file_size
+        if total > max_uncompressed:
+            raise ValueError(str(_("The Excel file expands beyond the allowed size.")))
+        if info.file_size > max_ratio * max(info.compress_size, 1):
+            raise ValueError(str(_("The Excel file exceeds the allowed compression ratio.")))
 
 
 def validate_configuration_json_payload(payload: Any) -> None:

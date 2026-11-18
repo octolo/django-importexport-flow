@@ -5,15 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from ...utils.helpers import (
-    M2M_SLOT_PATH_PATTERN,
-    get_field_or_accessor,
     normalize_table_column,
     parse_reverse_expand_spec,
-    verbose_name_for_field_path,
 )
 from .paths import (
     resolve_import_column_paths,
@@ -126,35 +124,74 @@ def _header_matches_expected_import(
     model: type[models.Model],
     path: str,
 ) -> bool:
-    a = actual.strip()
-    e = expected.strip()
-    if a == e:
-        return True
-    m = M2M_SLOT_PATH_PATTERN.match(path.strip())
-    if not m:
-        return False
-    rel_name, _slot_s, sub = m.groups()
-    field = get_field_or_accessor(model, rel_name)
-    if isinstance(field, models.ManyToManyField):
-        rm = field.remote_field.model
-    elif getattr(field, "one_to_many", False) and not getattr(field, "many_to_many", False):
-        rm = field.related_model
-    else:
-        return False
+    from ...utils.translations import import_header_aliases
 
-    vn = verbose_name_for_field_path(rm, sub)
-    if vn is None:
+    a = actual.strip()
+    aliases = import_header_aliases(model, path)
+    if a == expected.strip() or a in aliases:
+        return True
+    return any(base and a.startswith(base) for base in aliases)
+
+
+def _reverse_expand_warnings(column_paths: list[str]) -> list[str]:
+    warnings: list[str] = []
+    for spec in column_paths:
+        label = str(spec)
+        if parse_reverse_expand_spec(label):
+            warnings.append(
+                str(_("“%(col)s”: reverse-expand columns are not imported.") % {"col": label})
+            )
+    return warnings
+
+
+def _field_requires_first_row(field: Any) -> bool:
+    if field is None:
         return False
-    base = str(vn).strip()
-    return a.startswith(base)
+    if not field.many_to_one and not field.concrete:
+        return False
+    if getattr(field, "auto_created", False) and not getattr(field, "concrete", True):
+        return False
+    if field.blank or getattr(field, "auto_now", False) or getattr(field, "auto_now_add", False):
+        return False
+    return not field.has_default()
+
+
+def _missing_required_first_row(
+    model: type[models.Model],
+    column_paths: list[str],
+    expected: list[str],
+    first: pd.Series,
+) -> list[str]:
+    errors: list[str] = []
+    headers = [str(header).strip() for header in expected]
+    for index, spec in enumerate(column_paths):
+        if parse_reverse_expand_spec(str(spec)):
+            continue
+        path = normalize_table_column(str(spec))
+        if "." in path:
+            continue
+        try:
+            field = model._meta.get_field(path)
+        except FieldDoesNotExist:
+            continue
+        if not _field_requires_first_row(field):
+            continue
+        header = headers[index] if index < len(headers) else ""
+        raw = first.iloc[index] if index < len(first.index) else None
+        if pd.isna(raw) or (isinstance(raw, str) and not raw.strip()):
+            errors.append(
+                str(
+                    _("First row: “%(header)s” is required for field %(field)s.")
+                    % {"header": header, "field": path}
+                )
+            )
+    return errors
 
 
 def validate_import_preview(
     df: pd.DataFrame,
     import_definition: Any,
 ) -> tuple[list[str], list[str], list[str], pd.DataFrame | None]:
-    errors: list[str] = []
-    warnings: list[str] = []
     path_errs, col_paths = resolve_import_column_paths(import_definition, df)
     if path_errs:
         return path_errs, [], [], None
@@ -165,57 +202,14 @@ def validate_import_preview(
 
     expected = _expected_headers(import_definition, column_paths=col_paths)
     if not expected:
-        errors.append(str(_("Could not resolve column headers for this import.")))
-        return errors, warnings, col_paths, None
+        return [str(_("Could not resolve column headers for this import."))], [], col_paths, None
 
     df_norm, norm_errs, _meta = normalize_import_dataframe(df, import_definition, col_paths)
     if norm_errs:
-        errors.extend(norm_errs)
-        return errors, warnings, col_paths, None
+        return norm_errs, [], col_paths, None
 
-    for spec in col_paths:
-        s = str(spec)
-        if parse_reverse_expand_spec(s):
-            warnings.append(
-                str(_("“%(col)s”: reverse-expand columns are not imported.") % {"col": s})
-            )
-
+    warnings = _reverse_expand_warnings(col_paths)
     if df_norm.empty:
-        errors.append(str(_("The file contains no data rows.")))
-        return errors, warnings, col_paths, None
-
-    exp = [str(h).strip() for h in expected]
-    first = df_norm.iloc[0]
-    for i, spec in enumerate(col_paths):
-        if parse_reverse_expand_spec(str(spec)):
-            continue
-        path = normalize_table_column(str(spec))
-        if "." in path:
-            continue
-        try:
-            field = model._meta.get_field(path)
-        except Exception:
-            continue
-        if not field.many_to_one and not field.concrete:
-            continue
-        if getattr(field, "auto_created", False) and not getattr(field, "concrete", True):
-            continue
-        if (
-            field.blank
-            or getattr(field, "auto_now", False)
-            or getattr(field, "auto_now_add", False)
-        ):
-            continue
-        if field.has_default():
-            continue
-        header = exp[i] if i < len(exp) else ""
-        raw = first.iloc[i] if i < len(first.index) else None
-        if pd.isna(raw) or (isinstance(raw, str) and not raw.strip()):
-            errors.append(
-                str(
-                    _("First row: “%(header)s” is required for field %(field)s.")
-                    % {"header": header, "field": path}
-                )
-            )
-
+        return [str(_("The file contains no data rows."))], warnings, col_paths, None
+    errors = _missing_required_first_row(model, col_paths, expected, df_norm.iloc[0])
     return errors, warnings, col_paths, df_norm

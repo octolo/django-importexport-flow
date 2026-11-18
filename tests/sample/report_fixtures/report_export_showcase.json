@@ -1,0 +1,139 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "e03b9453-838a-4484-bf33-61fe125915ef",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.416Z",
+        "updated_at": "2026-11-17T13:51:20.416Z",
+        "direction": "export",
+        "name": "Sample fixture — Showcase (field types)",
+        "named_id": "sample-fixture-showcase-field-types",
+        "description": "One column per common Django field, plus FK and M2M.",
+        "target": [
+          "sample",
+          "fieldshowcase"
+        ],
+        "manager": "objects",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 21,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "char_f",
+          "text_f",
+          "slug_f",
+          "email_f",
+          "url_f",
+          "int_f",
+          "bigint_f",
+          "smallint_f",
+          "posint_f",
+          "possmall_f",
+          "posbigint_f",
+          "float_f",
+          "decimal_f",
+          "bool_f",
+          "bool_null_f",
+          "date_f",
+          "datetime_f",
+          "time_f",
+          "duration_f",
+          "uuid_f",
+          "json_f",
+          "ip_f",
+          "fk_author.name",
+          "tags_m2m.0.name"
+        ],
+        "definition": "e03b9453-838a-4484-bf33-61fe125915ef",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 30,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 21,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 31,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 21,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 22,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "char_f",
+          "text_f",
+          "slug_f",
+          "email_f",
+          "url_f",
+          "int_f",
+          "bigint_f",
+          "smallint_f",
+          "posint_f",
+          "possmall_f",
+          "posbigint_f",
+          "float_f",
+          "decimal_f",
+          "bool_f",
+          "bool_null_f",
+          "date_f",
+          "datetime_f",
+          "time_f",
+          "duration_f",
+          "uuid_f",
+          "json_f",
+          "ip_f",
+          "fk_author.name",
+          "tags_m2m.0.name"
+        ],
+        "definition": "e03b9453-838a-4484-bf33-61fe125915ef",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 32,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 22,
+        "format_key": "json",
+        "template": ""
+      }
+    }
+  ]
+}

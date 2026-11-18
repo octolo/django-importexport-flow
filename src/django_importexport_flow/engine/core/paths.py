@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 import pandas as pd
+from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -13,9 +14,8 @@ from ...utils.helpers import (
     get_setting,
     normalize_table_column,
     parse_reverse_expand_spec,
+    resolve_column_header,
     resolve_expand_relation,
-    resolve_table_column_label,
-    verbose_name_for_field_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,31 @@ def _is_forward_fk_or_o2o_field(field: Any) -> bool:
     return bool(getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False))
 
 
+def _exclude_relation_field(model: type[models.Model], name: str) -> Any | None:
+    if "." in str(name):
+        return None
+    try:
+        return model._meta.get_field(name)
+    except FieldDoesNotExist:
+        return None
+
+
+def _relation_exclude_expands(field: Any) -> bool:
+    from django.db.models import ManyToManyField
+
+    if isinstance(field, ManyToManyField):
+        return True
+    if getattr(field, "one_to_many", False) and not getattr(field, "many_to_many", False):
+        fk = getattr(field, "remote_field", None)
+        return fk is not None and bool(getattr(fk, "many_to_one", False))
+    return _is_forward_fk_or_o2o_field(field)
+
+
+def _paths_covered_by_name(base: list[str], name: str) -> list[str]:
+    prefix = f"{name}."
+    return [path for path in base if path == name or path.startswith(prefix)]
+
+
 def _expand_exclude_for_forward_relations(
     model: type[models.Model],
     exclude: set[str],
@@ -77,33 +102,12 @@ def _expand_exclude_for_forward_relations(
     Same for a reverse FK accessor (e.g. ``book_set`` → ``book_set.0.title``, …).
     Dotted entries (e.g. ``author.name``) are left as single-path exclusions.
     """
-    from django.db.models import ManyToManyField
-
     out = set(exclude)
     for name in list(exclude):
-        if "." in str(name):
+        field = _exclude_relation_field(model, name)
+        if field is None or not _relation_exclude_expands(field):
             continue
-        try:
-            field = model._meta.get_field(name)
-        except Exception:
-            continue
-        if isinstance(field, ManyToManyField):
-            for p in base:
-                if p == name or p.startswith(f"{name}."):
-                    out.add(p)
-            continue
-        if getattr(field, "one_to_many", False) and not getattr(field, "many_to_many", False):
-            fk = getattr(field, "remote_field", None)
-            if fk is not None and getattr(fk, "many_to_one", False):
-                for p in base:
-                    if p == name or p.startswith(f"{name}."):
-                        out.add(p)
-                continue
-        if not _is_forward_fk_or_o2o_field(field):
-            continue
-        for p in base:
-            if p == name or p.startswith(f"{name}."):
-                out.add(p)
+        out.update(_paths_covered_by_name(base, name))
     return out
 
 
@@ -154,42 +158,71 @@ def _iter_reverse_o2m_slot_paths(
     Paths ``reverse_fk_accessor.N.field`` for each scalar on the child model
     (e.g. ``book_set.0.title`` for ``Author`` ← ``Book.author``).
     """
-    from django.db.models import ManyToManyField
-
     out: list[str] = []
     for field in model._meta.get_fields():
-        if not getattr(field, "one_to_many", False):
-            continue
-        if getattr(field, "many_to_many", False):
-            continue
-        fk = getattr(field, "remote_field", None)
-        if fk is None or not getattr(fk, "many_to_one", False):
-            continue
-        child_model = field.related_model
-        if child_model is None:
-            continue
-        rel_name = _reverse_o2m_accessor_name(field)
-        pk_name = getattr(child_model._meta.pk, "name", None) if child_model._meta.pk else None
-        for sub in child_model._meta.get_fields():
-            if not getattr(sub, "concrete", False):
-                continue
-            if isinstance(sub, ManyToManyField):
-                continue
-            if getattr(sub, "one_to_many", False):
-                continue
-            if getattr(sub, "auto_created", False) and not getattr(sub, "concrete", True):
-                continue
-            if getattr(sub, "is_relation", False):
-                continue
-            if pk_name and sub.name == pk_name:
-                continue
-            if getattr(sub, "many_to_one", False) or getattr(sub, "one_to_one", False):
-                rf = getattr(sub, "remote_field", None)
-                if rf is not None and getattr(rf, "model", None) == model:
-                    continue
-            for slot in range(slots):
-                out.append(f"{rel_name}.{slot}.{sub.name}")
+        out.extend(_reverse_o2m_slots_for_field(model, field, slots))
     return out
+
+
+def _reverse_o2m_slots_for_field(model: type[models.Model], field: Any, slots: int) -> list[str]:
+    from django.db.models import ManyToManyField
+
+    if not getattr(field, "one_to_many", False) or getattr(field, "many_to_many", False):
+        return []
+    fk = getattr(field, "remote_field", None)
+    child_model = getattr(field, "related_model", None)
+    if fk is None or not getattr(fk, "many_to_one", False) or child_model is None:
+        return []
+    rel_name = _reverse_o2m_accessor_name(field)
+    pk_name = getattr(child_model._meta.pk, "name", None) if child_model._meta.pk else None
+    names = [
+        sub.name
+        for sub in child_model._meta.get_fields()
+        if _is_reverse_slot_scalar(sub, pk_name, model, ManyToManyField)
+    ]
+    return [f"{rel_name}.{slot}.{name}" for name in names for slot in range(slots)]
+
+
+def _is_reverse_slot_scalar(field: Any, pk_name: str | None, parent: Any, m2m_type: type) -> bool:
+    if not getattr(field, "concrete", False) or isinstance(field, m2m_type):
+        return False
+    if getattr(field, "one_to_many", False):
+        return False
+    if getattr(field, "auto_created", False) and not getattr(field, "concrete", True):
+        return False
+    if getattr(field, "is_relation", False) or (pk_name and field.name == pk_name):
+        return False
+    if getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False):
+        remote = getattr(field, "remote_field", None)
+        if remote is not None and getattr(remote, "model", None) == parent:
+            return False
+    return True
+
+
+def _drop_implied_relation_roots(
+    model: type[models.Model],
+    seen: list[str],
+    *,
+    include_primary_key: bool,
+) -> list[str]:
+    nested_roots = {path.split(".", 1)[0] for path in seen if "." in path}
+    pk_name = getattr(model._meta.pk, "name", None) if model._meta.pk else None
+    out: list[str] = []
+    for path in seen:
+        if not include_primary_key and pk_name and path == pk_name:
+            continue
+        if "." not in path and path in nested_roots and _implied_forward_relation(model, path):
+            continue
+        out.append(path)
+    return out
+
+
+def _implied_forward_relation(model: type[models.Model], path: str) -> bool:
+    try:
+        field = model._meta.get_field(path)
+    except FieldDoesNotExist:
+        return False
+    return field is not None and _is_forward_fk_or_o2o_field(field)
 
 
 def default_importable_column_paths(
@@ -225,21 +258,7 @@ def default_importable_column_paths(
     for p in _iter_nested_fk_paths(model, max_depth=depth):
         if p not in seen:
             seen.append(p)
-    nested_roots = {p.split(".", 1)[0] for p in seen if "." in p}
-    pk_name = getattr(model._meta.pk, "name", None) if model._meta.pk else None
-    out: list[str] = []
-    for p in seen:
-        if not include_primary_key and pk_name and p == pk_name:
-            continue
-        if "." not in p and p in nested_roots:
-            try:
-                field = model._meta.get_field(p)
-            except Exception:
-                out.append(p)
-                continue
-            if _is_forward_fk_or_o2o_field(field):
-                continue
-        out.append(p)
+    out = _drop_implied_relation_roots(model, seen, include_primary_key=include_primary_key)
     for p in _iter_m2m_slot_paths(model, DEFAULT_M2M_IMPORT_SLOTS, max_depth=depth):
         if p not in out:
             out.append(p)
@@ -334,70 +353,104 @@ def _recursive_paths_under(
     if depth > max_depth:
         return []
     ancestors = frozenset(ancestor_models or ()) | {related_model}
-    out: list[str] = []
     pk_name = getattr(related_model._meta.pk, "name", None) if related_model._meta.pk else None
+    out = _concrete_paths_under(
+        related_model, prefix, depth, max_depth, m2m_type, ancestors, pk_name
+    )
+    out.extend(
+        _reverse_o2o_paths_under(related_model, prefix, depth, max_depth, m2m_type, ancestors)
+    )
+    return out
 
+
+def _concrete_paths_under(
+    related_model: type[models.Model],
+    prefix: str,
+    depth: int,
+    max_depth: int,
+    m2m_type: type,
+    ancestors: frozenset[type[models.Model]],
+    pk_name: str | None,
+) -> list[str]:
+    out: list[str] = []
     for field in related_model._meta.get_fields():
-        if not getattr(field, "concrete", False):
-            continue
-        if isinstance(field, m2m_type):
-            continue
-        if getattr(field, "one_to_many", False):
-            continue
-        if getattr(field, "auto_created", False) and not getattr(field, "concrete", True):
+        if not _include_concrete_field(field, m2m_type):
             continue
         if not field.is_relation:
-            if pk_name and field.name == pk_name:
-                continue
-            out.append(f"{prefix}.{field.name}")
+            if not (pk_name and field.name == pk_name):
+                out.append(f"{prefix}.{field.name}")
             continue
-        if field.many_to_many or field.one_to_many:
-            continue
-        if getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False):
-            remote = getattr(field, "remote_field", None)
-            if remote is None:
-                continue
-            remote_model = remote.model
-            if remote_model in ancestors:
-                continue
-            sub_prefix = f"{prefix}.{field.name}"
-            out.extend(
-                _recursive_paths_under(
-                    remote_model,
-                    sub_prefix,
-                    depth + 1,
-                    max_depth,
-                    m2m_type,
-                    ancestor_models=ancestors,
-                )
-            )
+        out.extend(_nested_relation_paths(field, prefix, depth, max_depth, m2m_type, ancestors))
+    return out
 
+
+def _include_concrete_field(field: Any, m2m_type: type) -> bool:
+    if not getattr(field, "concrete", False) or isinstance(field, m2m_type):
+        return False
+    if getattr(field, "one_to_many", False):
+        return False
+    return not (getattr(field, "auto_created", False) and not getattr(field, "concrete", True))
+
+
+def _nested_relation_paths(
+    field: Any,
+    prefix: str,
+    depth: int,
+    max_depth: int,
+    m2m_type: type,
+    ancestors: frozenset[type[models.Model]],
+) -> list[str]:
+    if field.many_to_many or field.one_to_many:
+        return []
+    if not (getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False)):
+        return []
+    remote = getattr(field, "remote_field", None)
+    if remote is None or remote.model in ancestors:
+        return []
+    return _recursive_paths_under(
+        remote.model,
+        f"{prefix}.{field.name}",
+        depth + 1,
+        max_depth,
+        m2m_type,
+        ancestor_models=ancestors,
+    )
+
+
+def _reverse_o2o_paths_under(
+    related_model: type[models.Model],
+    prefix: str,
+    depth: int,
+    max_depth: int,
+    m2m_type: type,
+    ancestors: frozenset[type[models.Model]],
+) -> list[str]:
+    out: list[str] = []
     for field in related_model._meta.get_fields():
-        if not getattr(field, "is_relation", False):
+        remote = field.related_model
+        if not _is_reverse_o2o(field) or remote is None or remote in ancestors:
             continue
-        if getattr(field, "many_to_many", False) or getattr(field, "one_to_many", False):
-            continue
-        if not getattr(field, "one_to_one", False):
-            continue
-        if getattr(field, "concrete", False):
-            continue
-        child_model = field.related_model
-        if child_model is None or child_model in ancestors:
-            continue
-        rel_name = field.name
-        sub_prefix = f"{prefix}.{rel_name}"
         out.extend(
             _recursive_paths_under(
-                child_model,
-                sub_prefix,
+                remote,
+                f"{prefix}.{field.name}",
                 depth + 1,
                 max_depth,
                 m2m_type,
                 ancestor_models=ancestors,
             )
         )
-
     return out
+
+
+def _is_reverse_o2o(field: Any) -> bool:
+    if not getattr(field, "is_relation", False):
+        return False
+    if getattr(field, "many_to_many", False) or getattr(field, "one_to_many", False):
+        return False
+    if not getattr(field, "one_to_one", False):
+        return False
+    return not getattr(field, "concrete", False)
 
 
 def infer_column_paths_from_headers(
@@ -408,7 +461,7 @@ def infer_column_paths_from_headers(
 ) -> list[str] | None:
     """
     Map each file header to a column path by matching
-    :func:`~django_importexport_flow.utils.helpers.resolve_table_column_label` for that path
+    :func:`~django_importexport_flow.utils.helpers.resolve_column_header` for that path
     (same labels as the example export). Uses the same recursive path set as
     :func:`default_importable_column_paths` (e.g. ``author.name``,
     ``author.profile.bio``).
@@ -421,10 +474,13 @@ def infer_column_paths_from_headers(
     stripped = [str(h).strip() for h in headers]
     seen_paths = default_importable_column_paths(model, max_relation_hops=max_relation_hops)
 
+    from ...utils.translations import catalogs_for_paths, import_header_aliases
+
+    catalogs = catalogs_for_paths(model, seen_paths)
     label_to_paths: dict[str, list[str]] = {}
     for path in seen_paths:
-        label = resolve_table_column_label(model, path)
-        label_to_paths.setdefault(label, []).append(path)
+        for label in import_header_aliases(model, path, catalogs=catalogs):
+            label_to_paths.setdefault(label, []).append(path)
 
     used: set[str] = set()
     out: list[str] = []
@@ -546,12 +602,12 @@ def sample_headers_for_import_definition(
         spec = normalize_table_column(str(col))
         parsed = parse_reverse_expand_spec(spec)
         if not parsed:
-            out.append(resolve_table_column_label(model, spec))
+            out.append(resolve_column_header(model, spec))
             continue
         rel_name, subfields = parsed
         try:
             related_model, _accessor = resolve_expand_relation(model, rel_name)
-        except Exception as exc:
+        except (FieldDoesNotExist, ValueError) as exc:
             logger.warning(
                 "resolve_expand_relation failed for column %r: %s",
                 spec,
@@ -560,6 +616,6 @@ def sample_headers_for_import_definition(
             out.append(spec)
             continue
         for sf in subfields:
-            vn = verbose_name_for_field_path(related_model, sf) or sf
+            vn = resolve_column_header(related_model, sf) or sf
             out.append(f"{vn} 1")
     return out

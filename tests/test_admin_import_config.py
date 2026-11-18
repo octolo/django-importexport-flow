@@ -1,4 +1,4 @@
-"""Tests for :func:`django_importexport_flow.admin.import_config.run_json_configuration_import`."""
+"""Tests for :func:`django_importexport_flow.admin.mixins.run_json_configuration_import`."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.serializers.base import DeserializationError
 from django.db import IntegrityError
 
-from django_importexport_flow.admin.import_config import run_json_configuration_import
+from django_importexport_flow.admin.mixins import run_json_configuration_import
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def test_run_json_configuration_import_success(request_obj, form_obj) -> None:
     )
 
 
-@patch("django_importexport_flow.admin.import_config.messages")
+@patch("django_importexport_flow.admin.mixins.messages")
 def test_run_json_configuration_import_value_error(mock_messages, request_obj, form_obj) -> None:
     def importer(data: dict) -> None:
         raise ValueError("bad payload")
@@ -57,7 +57,7 @@ def test_run_json_configuration_import_value_error(mock_messages, request_obj, f
     mock_messages.error.assert_called_once_with(request_obj, "bad payload")
 
 
-@patch("django_importexport_flow.admin.import_config.messages")
+@patch("django_importexport_flow.admin.mixins.messages")
 def test_run_json_configuration_import_validation_error(
     mock_messages, request_obj, form_obj
 ) -> None:
@@ -85,8 +85,8 @@ def test_run_json_configuration_import_validation_error(
         lambda: IntegrityError(),
     ],
 )
-@patch("django_importexport_flow.admin.import_config.messages")
-@patch("django_importexport_flow.admin.import_config.logger")
+@patch("django_importexport_flow.admin.mixins.messages")
+@patch("django_importexport_flow.admin.mixins.logger")
 def test_run_json_configuration_import_deserialization_or_integrity(
     mock_logger,
     mock_messages,
@@ -113,8 +113,8 @@ def test_run_json_configuration_import_deserialization_or_integrity(
     mock_logger.exception.assert_not_called()
 
 
-@patch("django_importexport_flow.admin.import_config.messages")
-@patch("django_importexport_flow.admin.import_config.logger")
+@patch("django_importexport_flow.admin.mixins.messages")
+@patch("django_importexport_flow.admin.mixins.logger")
 def test_run_json_configuration_import_unexpected(
     mock_logger,
     mock_messages,

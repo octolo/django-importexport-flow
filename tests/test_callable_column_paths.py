@@ -6,10 +6,10 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 
 from django_importexport_flow.engine import ExportTableEngine
-from django_importexport_flow.models import ExportConfigTable, ExportDefinition
+from django_importexport_flow.models import Definition
 from django_importexport_flow.utils.helpers import get_value_from_path
 from tests.sample.models import Author, Book
-
+from tests.support import attach_tabular_export
 
 # ---------------------------------------------------------------------------
 # Unit tests for get_value_from_path
@@ -63,14 +63,15 @@ def test_get_value_from_path_does_not_call_manager():
 
 @pytest.mark.django_db
 def test_export_engine_callable_column_on_target_model():
-    author = Author.objects.create(name="Proust")
+    Author.objects.create(name="Proust")
     ct = ContentType.objects.get_for_model(Author)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Authors callable",
         target=ct,
         manager="objects",
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["name", "get_display_name"],
         configuration={},
@@ -85,12 +86,13 @@ def test_export_engine_callable_column_on_related_model():
     author = Author.objects.create(name="Flaubert")
     Book.objects.create(title="Madame Bovary", author=author)
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books callable",
         target=ct,
         manager="objects",
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "author.get_display_name"],
         configuration={},
@@ -105,12 +107,13 @@ def test_export_engine_callable_column_null_relation():
     """No author set — callable on related model should not crash, returns empty string."""
     Book.objects.create(title="Orphan Book", author=None)
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books null author callable",
         target=ct,
         manager="objects",
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "author.get_display_name"],
         configuration={},

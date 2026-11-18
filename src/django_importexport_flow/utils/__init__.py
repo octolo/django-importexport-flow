@@ -6,12 +6,12 @@ Other helpers: ``django_importexport_flow.utils.helpers``, ``.validation``, etc.
 from __future__ import annotations
 
 __all__ = [
+    "generate_example_file",
     "process_export",
     "process_import",
-    "validate_import",
+    "resolved_headers_for_import",
     "run_export_with_audit",
-    "generate_example_file",
-    "column_labels_for_import_definition",
+    "validate_import",
 ]
 
 
@@ -36,10 +36,10 @@ def __getattr__(name: str):
         from .process import generate_example_file
 
         return generate_example_file
-    if name == "column_labels_for_import_definition":
-        from .process import column_labels_for_import_definition
+    if name == "resolved_headers_for_import":
+        from .process import resolved_headers_for_import
 
-        return column_labels_for_import_definition
+        return resolved_headers_for_import
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

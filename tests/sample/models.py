@@ -60,6 +60,12 @@ class Tag(models.Model):
     )
 
 
+class BookQuerySet(models.QuerySet):
+    def with_title_len(self):
+        """Queryset annotation used by the sample annotation export fixture."""
+        return self.annotate(title_len=models.functions.Length("title"))
+
+
 class Book(models.Model):
     title = models.CharField(_("Book title"), max_length=100)
     pages = models.PositiveIntegerField(_("Nb. of pages"), default=0)
@@ -86,17 +92,7 @@ class Book(models.Model):
         verbose_name=_("Tags"),
     )
 
-    @classmethod
-    def mark_import_success(cls, request, **kwargs):
-        from tests.sample.processing_backends import mark_import_success
-
-        return mark_import_success(request, **kwargs)
-
-    @classmethod
-    def mark_export_success(cls, request, **kwargs):
-        from tests.sample.processing_backends import mark_export_success
-
-        return mark_export_success(request, **kwargs)
+    objects = BookQuerySet.as_manager()
 
 
 class FieldShowcase(models.Model):

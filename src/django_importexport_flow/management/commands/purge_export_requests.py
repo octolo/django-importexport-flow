@@ -55,10 +55,8 @@ class Command(BaseCommand):
             if er.output_file:
                 try:
                     er.output_file.delete(save=False)
-                except Exception as exc:
-                    self.stderr.write(
-                        f"Could not delete file for ExportRequest pk={er.pk}: {exc}"
-                    )
+                except Exception as exc:  # noqa: BLE001 — storage backends raise their own errors
+                    self.stderr.write(f"Could not delete file for ExportRequest pk={er.pk}: {exc}")
             er.delete()
             deleted += 1
 

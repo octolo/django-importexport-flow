@@ -37,6 +37,7 @@ htmlcov/
 .tox/
 .nox/
 .hypothesis/
+.test.sqlite3
 
 # Type checking
 .mypy_cache/
@@ -62,6 +63,7 @@ Thumbs.db
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+db.sqlite3.old-*
 /media
 /staticfiles
 
@@ -77,3 +79,4 @@ db.sqlite3-journal
 
 # Local import uploads (MEDIA during dev)
 report_import_asks/
+export_outputs/

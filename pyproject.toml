@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-importexport-flow"
-version = "1.1.0"
+version = "1.2.0"
 description = "Declarative export and import definitions for Django (queryset, tabular/PDF, hooks)."
 readme = "README.md"
 authors = [{ name = "Octolo", email = "dev@octolo.tech" }]
@@ -36,7 +36,7 @@ classifiers = [
 ]
 dependencies = [
     "Django>=5.0,<6.0",
-    "django-boosted>=1.0.0",
+    "django-boosted>=1.1.0",
     "django-virtualqueryset>=1.0.0",
     "openpyxl>=3.1.5",
     "pandas>=2.3.3; python_version < '3.11'",
@@ -60,6 +60,13 @@ dev = [
     "django-stubs>=5.0.0",
     "django-extensions>=3.2.0",
     "weasyprint>=62.0",
+    "radon>=6.0",
+    "xenon>=0.9",
+    "vulture>=2.14",
+    "bandit>=1.8",
+    "pip-audit>=2.9",
+    "pytest-cov>=6.0",
+    "pandas-stubs>=2.2",
 ]
 
 
@@ -73,11 +80,28 @@ DJANGO_SETTINGS_MODULE = "tests.settings"
 testpaths = ["tests"]
 pythonpath = ["src"]
 
+[tool.coverage.run]
+source = ["src/django_importexport_flow"]
+branch = true
+omit = ["*/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Measured branch-aware coverage is 77.24%. The gate stays below it.
+fail_under = 72
+
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
+warn_return_any = false
 plugins = ["mypy_django_plugin.main"]
 mypy_path = "src"
+exclude = ["migrations"]
+
+# Third-party packages shipped without stubs. Local modules stay checked.
+[[tool.mypy.overrides]]
+module = ["django_boosted.*", "namedid.*", "celery.*", "django_rq.*", "weasyprint", "weasyprint.*"]
+ignore_missing_imports = true
 
 [tool.django-stubs]
 django_settings_module = "tests.settings"
@@ -88,3 +112,8 @@ target-version = "py310"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/sample/report_fixtures/build_fixtures.py" = ["E402"]
+# Django migration operations and dependencies are lists by framework contract.
+"**/migrations/*.py" = ["RUF012"]
+# Invalid payloads raise ValueError; that is the public contract of these helpers.
+"src/django_importexport_flow/utils/serialization.py" = ["TRY004"]
+"src/django_importexport_flow/utils/upload_validation.py" = ["TRY004"]

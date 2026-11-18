@@ -5,27 +5,24 @@ from __future__ import annotations
 import logging
 import traceback
 from io import BytesIO, StringIO
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
-from django.utils import timezone
 
-from ..engine.core.delegate import call_delegate, has_delegate
 from ..engine.core.export import (
-    run_table_export,
     snapshot_export_filter_payload,
     snapshot_export_manager_kwargs_payload,
 )
+from ..engine.core.hooks import run_export_hooks, run_import_hook
 from ..engine.core.import_ import (
     create_import_request,
     effective_import_column_paths,
-    read_uploaded_file,
     sample_headers_for_import_definition,
     validate_import_preview,
 )
 from ..forms import MAX_TABULAR_IMPORT_BYTES
-from ..models import ExportDefinition, ExportRequest, ImportDefinition, ImportRequest
-from ..utils.helpers import get_setting, normalize_table_column, resolve_table_column_label
+from ..models import Definition, ExportRequest, ImportRequest
+from ..utils.helpers import get_setting, normalize_table_column, resolve_column_header
 from .lookup import (
     get_export_definition_by_uuid_or_named_id,
     get_import_definition_by_uuid_or_named_id,
@@ -36,10 +33,10 @@ logger = logging.getLogger(__name__)
 
 def _resolve_import_definition(
     *,
-    import_definition: ImportDefinition | None = None,
+    import_definition: Definition | None = None,
     import_definition_uuid: str | None = None,
     import_definition_key: str | None = None,
-) -> ImportDefinition:
+) -> Definition:
     if import_definition is not None:
         return import_definition
     ref = import_definition_key or import_definition_uuid
@@ -66,17 +63,15 @@ def _cell_jsonable(value: Any) -> Any:
     return value
 
 
-def column_labels_for_import_definition(
-    definition: ImportDefinition, column_paths: list[str]
-) -> list[str]:
+def resolved_headers_for_import(definition: Definition, column_paths: list[str]) -> list[str]:
     """Human-readable header labels for import paths (same logic as import preview)."""
     preview_labels = sample_headers_for_import_definition(definition, column_paths=column_paths)
     if len(preview_labels) != len(column_paths):
-        tgt = definition.target.model_class() if definition.target_id else None
+        target = definition.target
+        tgt = target.model_class() if definition.target_id and target is not None else None
         if tgt is not None:
             return [
-                resolve_table_column_label(tgt, normalize_table_column(str(p)))
-                for p in column_paths
+                resolve_column_header(tgt, normalize_table_column(str(p))) for p in column_paths
             ]
         return [str(p) for p in column_paths]
     return preview_labels
@@ -134,13 +129,15 @@ def _validation_dataset(
 def process_export(
     *,
     filter_payload: dict[str, Any] | None = None,
-    export_definition: ExportDefinition | None = None,
+    export_definition: Definition | None = None,
     export_definition_uuid: str | None = None,
     export_definition_key: str | None = None,
     export_format: str | None = None,
+    template_override: str = "",
+    configuration_overrides: dict[str, Any] | None = None,
 ) -> tuple[bytes, str, str]:
     """
-    Process a table export (CSV / Excel / JSON) for an :class:`~django_importexport_flow.models.ExportDefinition`.
+    Process a table export (CSV / Excel / JSON) for an :class:`~django_importexport_flow.models.Definition`.
 
     Pass ``export_definition``, or a lookup string: ``export_definition_key`` (UUID or ``named_id``), or
     ``export_definition_uuid`` (same as ``export_definition_key``, kept for backward compatibility).
@@ -162,15 +159,30 @@ def process_export(
         data["export_format"] = export_format
     if "export_format" not in data:
         raise ValueError("export_format must be set in filter_payload or as export_format=…")
-    if has_delegate(definition):
-        return call_delegate(definition, data)
-    return run_table_export(definition, data)
+    from ..engine.core.overrides import (
+        normalize_configuration_overrides,
+        validate_template_override,
+    )
+
+    selected_format = str(data.get("export_format") or "")
+    return run_export_hooks(
+        definition,
+        data,
+        template_override=validate_template_override(
+            template_override,
+            export_format=selected_format,
+        ),
+        configuration_overrides=normalize_configuration_overrides(
+            configuration_overrides,
+            export_format=selected_format,
+        ),
+    )
 
 
 def process_import(
     *,
     file: Any,
-    import_definition: ImportDefinition | None = None,
+    import_definition: Definition | None = None,
     import_definition_uuid: str | None = None,
     import_definition_key: str | None = None,
     user: Any | None = None,
@@ -183,7 +195,7 @@ def process_import(
     related_object: Any | None = None,
 ) -> dict[str, Any]:
     """
-    Validate and optionally process a tabular import for an :class:`~django_importexport_flow.models.ImportDefinition`.
+    Validate and optionally process a tabular import for an :class:`~django_importexport_flow.models.Definition`.
 
     Pass ``import_definition``, or ``import_definition_key`` (UUID or ``named_id``), or
     ``import_definition_uuid`` (same as ``import_definition_key``, backward compatible).
@@ -203,20 +215,6 @@ def process_import(
     )
 
     limit = max_bytes if max_bytes is not None else MAX_TABULAR_IMPORT_BYTES
-
-    if has_delegate(definition):
-        return call_delegate(
-            definition,
-            filter_payload,
-            file=file,
-            user=user,
-            related_object=related_object,
-            inferred_column_paths=inferred_column_paths,
-            preview_only=preview_only,
-            max_bytes=limit,
-            preview_row_limit=preview_row_limit,
-            run_async=run_async,
-        )
 
     if preview_only:
         return validate_import(
@@ -249,14 +247,14 @@ def validate_import(
     *,
     file: Any | None = None,
     dataframe: pd.DataFrame | None = None,
-    import_definition: ImportDefinition | None = None,
+    import_definition: Definition | None = None,
     import_definition_uuid: str | None = None,
     import_definition_key: str | None = None,
     max_bytes: int | None = None,
     row_limit: int | None = None,
 ) -> dict[str, Any]:
     """
-    Validate tabular data against an :class:`~django_importexport_flow.models.ImportDefinition`,
+    Validate tabular data against an :class:`~django_importexport_flow.models.Definition`,
     and build a **validation dataset**: column paths, human labels, and preview rows.
 
     Pass either ``file`` (uploaded file / file-like) or ``dataframe`` (already parsed).
@@ -282,12 +280,21 @@ def validate_import(
     if dataframe is not None:
         df = dataframe
     elif file is not None:
-        df = read_uploaded_file(file, limit)
+        dataset = run_import_hook(
+            definition,
+            file,
+            {
+                "max_bytes": limit,
+                "name": getattr(file, "name", "") or "",
+                "content_type": getattr(file, "content_type", "") or "",
+            },
+        )
+        df = dataset.dataframe
     else:
         raise ValueError("validate_import requires file= or dataframe=.")
 
     errs, warns, paths, df_norm = validate_import_preview(df, definition)
-    labels = column_labels_for_import_definition(definition, paths) if paths else []
+    labels = resolved_headers_for_import(definition, paths) if paths else []
     vds = _validation_dataset(df_norm, paths, labels, row_limit=preview_cap)
     return {
         "errors": errs,
@@ -300,85 +307,87 @@ def validate_import(
 
 def run_export_with_audit(
     *,
-    export_definition: ExportDefinition,
+    export_definition: Definition,
     filter_payload: dict[str, Any],
     user: Any | None,
+    template_override: str = "",
+    configuration_overrides: dict[str, Any] | None = None,
 ) -> tuple[bytes, str, str]:
     """
     Run a table export and persist an :class:`~django_importexport_flow.models.ExportRequest`
     audit row (success or failure).
 
-    Both the **native** path and **custom backends** persist the result in
-    ``ExportRequest.output_file`` on success.  The original exception type is
-    preserved for the native path so callers (e.g. the admin) can distinguish
+    The export hooks produce the file. This function persists the result in
+    ``ExportRequest.output_file`` on success and preserves the original exception
+    type so callers (e.g. the admin) can distinguish
     :exc:`~django.core.exceptions.ValidationError`, :exc:`ValueError`,
     :exc:`OSError`, :exc:`MemoryError`, etc.
-
-    For a **custom backend**, the backend callable receives the
-    :class:`~django_importexport_flow.models.ExportRequest` instance (status
-    ``processing``) and is responsible for updating its status and writing to
-    ``output_file``.  A :exc:`RuntimeError` is raised when the backend leaves the
-    request in a non-success state.
     """
-    from ..apps import DjangoImportExportFlowConfig
+    from ..engine.core.overrides import (
+        normalize_configuration_overrides,
+        validate_template_override,
+    )
     from ..engine.core.processing import (
         _build_er_filter_payload,
         _finalize_native_export,
         _mark_request_failure,
-        get_export_processing_config,
-        run_custom_processing,
     )
 
     payload = snapshot_export_filter_payload(filter_payload)
     mgr_payload = snapshot_export_manager_kwargs_payload(filter_payload)
     export_fmt = str(filter_payload.get("export_format") or "")
+    template_override = validate_template_override(template_override, export_format=export_fmt)
+    configuration_overrides = normalize_configuration_overrides(
+        configuration_overrides,
+        export_format=export_fmt,
+    )
 
     er = ExportRequest(
         export_definition=export_definition,
         export_format=export_fmt,
         filter_payload=payload,
         manager_kwargs_payload=mgr_payload,
-        status=ExportRequest.Status.PROCESSING,
+        template_override=template_override,
+        configuration_overrides=configuration_overrides,
+        status=cast("str", ExportRequest.Status.PROCESSING),
         initiated_by=user,
     )
     er.save()
 
-    backend, kwargs = get_export_processing_config(export_definition)
-
-    if not backend:
-        # Native path — run in memory, persist output_file, re-raise original exception.
-        try:
-            content, content_type, ext = run_table_export(
-                export_definition, _build_er_filter_payload(er)
-            )
-        except Exception:
-            _mark_request_failure(er, traceback.format_exc())
-            raise
-        _finalize_native_export(er, content, ext)
-        return content, content_type, ext
-
-    # Custom backend path — backend owns the ExportRequest update.
-    target = export_definition.target.model_class() if export_definition.target_id else None
-    run_custom_processing(er, backend=backend, kwargs=kwargs, target_model=target)
-    er.refresh_from_db()
-
-    if er.status != ExportRequest.Status.SUCCESS:
-        raise RuntimeError(er.error_trace or "Export did not complete successfully.")
-
-    if not er.output_file:
-        raise RuntimeError(
-            "Custom export backend succeeded but did not write output_file."
+    try:
+        content, content_type, ext = run_export_hooks(
+            export_definition,
+            _build_er_filter_payload(er),
+            template_override=er.template_override,
+            configuration_overrides=er.configuration_overrides,
         )
-    content = er.output_file.read()
-    dispatch = DjangoImportExportFlowConfig.export_format_dispatch
-    if export_fmt not in dispatch:
-        raise ValueError(f"Unsupported export_format: {export_fmt!r}")
-    _method, content_type, ext = dispatch[export_fmt]
+    except Exception:
+        _mark_request_failure(er, traceback.format_exc())
+        raise
+    _finalize_native_export(er, content, ext)
     return content, content_type, ext
 
 
+def _import_csv_delimiter(import_definition: Definition) -> str:
+    from ..engine.core.formats import get_import_config
+
+    try:
+        config = get_import_config(import_definition, "csv")
+    except ValueError:
+        config = None
+    raw = (
+        config.configuration
+        if config is not None and isinstance(config.configuration, dict)
+        else {}
+    )
+    delim = raw.get("delimiter", ",")
+    if not isinstance(delim, str) or len(delim) != 1:
+        return ","
+    return delim
+
+
 def generate_example_file(
-    import_definition: ImportDefinition,
+    import_definition: Definition,
     *,
     example_format: str,
 ) -> tuple[bytes, str, str]:
@@ -403,7 +412,7 @@ def generate_example_file(
         )
 
     if example_format == "csv":
-        delim = (import_definition.configuration or {}).get("csv", {}).get("delimiter", ",")
+        delim = _import_csv_delimiter(import_definition)
         if not isinstance(delim, str) or len(delim) != 1:
             delim = ","
         buffer = StringIO()

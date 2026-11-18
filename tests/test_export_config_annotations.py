@@ -6,39 +6,40 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 
 from django_importexport_flow.engine import ExportTableEngine
-from django_importexport_flow.models import ExportConfigTable, ExportDefinition
-from django_importexport_flow.utils.helpers import resolve_table_column_label
+from django_importexport_flow.models import Definition
+from django_importexport_flow.utils.helpers import resolve_column_header
 from tests.sample.models import Author, Book
+from tests.support import attach_tabular_export
 
 
 @pytest.mark.django_db
 def test_table_columns_allow_unknown_paths_without_validation():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Any column paths",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    cfg = ExportConfigTable(
+    attach_tabular_export(
         export=definition,
         columns=["totally_fake_field", "title"],
         configuration={},
     )
-    cfg.full_clean()
-    cfg.save()
 
 
 @pytest.mark.django_db
 def test_export_configuration_column_label_in_config_json():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Label overrides",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["totally_fake_field", "title"],
         configuration={"totally_fake_field_label": "Libellé personnalisé"},
@@ -49,9 +50,10 @@ def test_export_configuration_column_label_in_config_json():
     assert engine.get_headers() == ["Libellé personnalisé", title_v]
 
 
-def test_resolve_table_column_label_uses_configuration_override():
+@pytest.mark.django_db
+def test_resolve_column_header_uses_configuration_override():
     assert (
-        resolve_table_column_label(
+        resolve_column_header(
             Book,
             "my_annotation",
             configuration={"my_annotation_label": "Ann display"},
@@ -63,14 +65,15 @@ def test_resolve_table_column_label_uses_configuration_override():
 @pytest.mark.django_db
 def test_export_definition_order_by_accepts_annotation_from_table_configuration():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Order by ann",
         target=ct,
         manager="objects",
         filter_config={},
         order_by=[],
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={"annotation_columns": ["book_count"]},
@@ -83,49 +86,49 @@ def test_export_definition_order_by_accepts_annotation_from_table_configuration(
 @pytest.mark.django_db
 def test_table_columns_allow_property_on_target_model():
     ct = ContentType.objects.get_for_model(Author)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Author props",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    cfg = ExportConfigTable(
+    attach_tabular_export(
         export=definition,
         columns=["name", "name_upper"],
         configuration={},
     )
-    cfg.full_clean()
 
 
 @pytest.mark.django_db
 def test_table_columns_allow_property_on_related_model():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Book author prop",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    cfg = ExportConfigTable(
+    attach_tabular_export(
         export=definition,
         columns=["title", "author.name_upper"],
         configuration={},
     )
-    cfg.full_clean()
 
 
 @pytest.mark.django_db
 def test_table_columns_allow_jsonfield_subpath():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Book json subpath",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    cfg = ExportConfigTable(
+    attach_tabular_export(
         export=definition,
         columns=["title", "metadata.lang"],
         configuration={},
     )
-    cfg.full_clean()

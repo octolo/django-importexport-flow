@@ -8,9 +8,10 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 
 from django_importexport_flow.engine.core.import_ import default_importable_column_paths
-from django_importexport_flow.models import ImportDefinition, ImportRequest
+from django_importexport_flow.models import Definition, ImportRequest
 from django_importexport_flow.utils.process import process_import, validate_import
 from tests.sample.models import Book
+from tests.support import attach_import_spreadsheet
 
 
 def _book_columns_exclude_all_but(*keep: str) -> list[str]:
@@ -22,12 +23,14 @@ def _book_columns_exclude_all_but(*keep: str) -> list[str]:
 def test_import_partial_failure_keeps_earlier_rows_and_multiline_trace(auditor_user):
     """Row 3 has an invalid date; rows 1–2 remain committed."""
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Mass err",
         target=ct,
         filter_config={},
         columns_exclude=_book_columns_exclude_all_but("title", "pages", "publication_date"),
     )
+    attach_import_spreadsheet(definition)
     t_v = str(Book._meta.get_field("title").verbose_name)
     p_v = str(Book._meta.get_field("pages").verbose_name)
     d_v = str(Book._meta.get_field("publication_date").verbose_name)
@@ -65,12 +68,14 @@ def test_import_many_rows_with_tabular_batch_size(settings, auditor_user):
     """TABULAR_IMPORT_BATCH_SIZE triggers batched bulk_create when no M2M slots."""
     settings.DJANGO_IMPORTEXPORT_FLOW = {"TABULAR_IMPORT_BATCH_SIZE": 8}
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Batch bulk",
         target=ct,
         filter_config={},
         columns_exclude=_book_columns_exclude_all_but("title", "pages"),
     )
+    attach_import_spreadsheet(definition)
     t_v = str(Book._meta.get_field("title").verbose_name)
     p_v = str(Book._meta.get_field("pages").verbose_name)
     lines = [f"{t_v},{p_v}"] + [f"Batch{i:02d},{i}" for i in range(20)]
@@ -95,12 +100,14 @@ def test_import_many_rows_with_tabular_batch_size(settings, auditor_user):
 @pytest.mark.django_db
 def test_import_preview_reports_many_rows_without_db_writes():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Preview many",
         target=ct,
         filter_config={},
         columns_exclude=_book_columns_exclude_all_but("title", "pages"),
     )
+    attach_import_spreadsheet(definition)
     lines = ["title,pages"] + [f"R{i},{i}" for i in range(50)]
     raw = "\n".join(lines).encode("utf-8")
     buf = BytesIO(raw)

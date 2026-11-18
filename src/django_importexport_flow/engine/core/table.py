@@ -4,24 +4,32 @@ from io import BytesIO, StringIO
 from typing import Any
 
 import pandas as pd
+from django.core.exceptions import FieldDoesNotExist, FieldError
 
-from ...models import ImportDefinition, ExportConfigTable
 from ...utils.helpers import (
-    column_label_override_from_configuration,
     get_expanded_related_value,
     get_value_from_path,
     max_relation_counts,
     normalize_table_column,
     parse_reverse_expand_spec,
+    resolve_column_header,
     resolve_expand_relation,
-    resolve_table_column_label,
-    verbose_name_for_field_path,
 )
 from .engine import CoreEngine
 
-
 _EXCEL_INVALID_SHEET_RE = re.compile(r"[\\/*?:\[\]]")
 _EXCEL_MAX_SHEET_NAME = 31
+_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _escape_spreadsheet_formula(value: Any) -> Any:
+    """Prefix text that a spreadsheet application could execute as a formula."""
+    if not isinstance(value, str) or not value or value.startswith("'"):
+        return value
+    probe = value.lstrip()
+    if probe[:1] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
 
 
 def _sanitize_excel_sheet_name(value: Any) -> str:
@@ -45,19 +53,18 @@ class TableEngine(CoreEngine):
 
     def __init__(self, definition, request=None, config=None):
         if config is None:
-            if isinstance(definition, ImportDefinition):
+            if getattr(definition, "direction", None) == "import":
                 config = definition
             else:
-                try:
-                    config = definition.config_table
-                except ExportConfigTable.DoesNotExist:
-                    config = None
+                from .formats import tabular_engine_config
+
+                config = tabular_engine_config(definition)
         super().__init__(definition, request, config)
         self._flat_columns_cache: list[dict[str, Any]] | None = None
         self._expand_prefetch_relations: list[str] = []
 
     def _parse_column_pieces(self) -> list[tuple[Any, ...]]:
-        if isinstance(self.definition, ImportDefinition):
+        if getattr(self.definition, "direction", None) == "import":
             from .paths import effective_import_column_paths
 
             raw = effective_import_column_paths(self.definition)
@@ -78,7 +85,7 @@ class TableEngine(CoreEngine):
                 try:
                     related_model, py_accessor = resolve_expand_relation(model, rel)
                     pieces.append(("expand", py_accessor, subfields, related_model))
-                except Exception:
+                except (FieldDoesNotExist, ValueError):
                     pieces.append(("scalar", spec))
             else:
                 pieces.append(("scalar", spec))
@@ -95,10 +102,7 @@ class TableEngine(CoreEngine):
         if not expand_rels:
             for p in pieces:
                 data = p[1]
-                try:
-                    label = resolve_table_column_label(model, data, configuration=cfg)
-                except Exception:
-                    label = str(data)
+                label = resolve_column_header(model, data, configuration=cfg)
                 flat.append({"kind": "scalar", "data": data, "label": label})
             return flat
 
@@ -107,26 +111,20 @@ class TableEngine(CoreEngine):
             qs = qs.prefetch_related(*expand_rels)
         try:
             counts = max_relation_counts(qs, expand_rels)
-        except Exception:
+        except (FieldError, FieldDoesNotExist, TypeError, ValueError):
             counts = {r: 0 for r in expand_rels}
 
         for p in pieces:
             if p[0] == "scalar":
                 data = p[1]
-                try:
-                    label = resolve_table_column_label(model, data, configuration=cfg)
-                except Exception:
-                    label = str(data)
+                label = resolve_column_header(model, data, configuration=cfg)
                 flat.append({"kind": "scalar", "data": data, "label": label})
             else:
                 py_accessor, subfields, related_model = p[1], p[2], p[3]
                 n_slots = counts.get(py_accessor, 0)
                 for slot in range(n_slots):
                     for sf in subfields:
-                        vn = verbose_name_for_field_path(related_model, sf)
-                        if vn is None or not str(vn).strip():
-                            vn = column_label_override_from_configuration(cfg, sf)
-                        vn = (str(vn).strip() if vn is not None else "") or sf
+                        vn = resolve_column_header(related_model, sf, configuration=cfg) or sf
                         label = f"{vn} {slot + 1}"
                         flat.append(
                             {
@@ -156,11 +154,9 @@ class TableEngine(CoreEngine):
             if col["kind"] == "scalar":
                 raw = get_value_from_path(obj, col["data"])
                 return _format_cell_export_value(raw)
-            raw = get_expanded_related_value(
-                obj, col["relation"], col["slot"], col["field"]
-            )
+            raw = get_expanded_related_value(obj, col["relation"], col["slot"], col["field"])
             return _format_cell_export_value(raw)
-        except Exception:
+        except Exception:  # noqa: BLE001 — a column callable may raise anything
             return ""
 
     @classmethod
@@ -169,10 +165,8 @@ class TableEngine(CoreEngine):
         try:
             if col["kind"] == "scalar":
                 return get_value_from_path(obj, col["data"])
-            return get_expanded_related_value(
-                obj, col["relation"], col["slot"], col["field"]
-            )
-        except Exception:
+            return get_expanded_related_value(obj, col["relation"], col["slot"], col["field"])
+        except Exception:  # noqa: BLE001 — a column callable may raise anything
             return None
 
     def get_columns(self):
@@ -230,7 +224,21 @@ class TableEngine(CoreEngine):
         rows = self.get_rows()
         return pd.DataFrame(rows, columns=headers)
 
+    def _spreadsheet_dataframe(self) -> pd.DataFrame:
+        """Copy the export frame and optionally neutralize spreadsheet formulas."""
+        from ...utils.helpers import get_setting
+
+        frame = self._tabular_export_dataframe()
+        if not get_setting("ESCAPE_SPREADSHEET_FORMULAS", True):
+            return frame
+        return frame.map(_escape_spreadsheet_formula)
+
     def get_configuration(self):
+        if getattr(self.definition, "direction", None) == "import":
+            from .formats import tabular_engine_config
+
+            tabular = tabular_engine_config(self.definition)
+            return tabular.configuration if tabular is not None else {}
         if not self.config:
             return {}
         return self.config.configuration or {}
@@ -264,7 +272,7 @@ class TableEngine(CoreEngine):
         if not isinstance(sep, str) or len(sep) != 1:
             sep = ","
         buffer = StringIO()
-        self._tabular_export_dataframe().to_csv(buffer, index=False, sep=sep, **csv_opts)
+        self._spreadsheet_dataframe().to_csv(buffer, index=False, sep=sep, **csv_opts)
         return buffer.getvalue().encode("utf-8")
 
     def _resolve_split_by_column(self, df: "pd.DataFrame", split_by: str) -> str | None:
@@ -281,7 +289,7 @@ class TableEngine(CoreEngine):
         normalized = split_by.replace("__", ".")
         for col in self._get_flat_columns():
             data = col.get("data", "")
-            if (data == split_by or data == normalized) and col.get("label") in df.columns:
+            if data in (split_by, normalized) and col.get("label") in df.columns:
                 return col["label"]
         return None
 
@@ -298,9 +306,9 @@ class TableEngine(CoreEngine):
         cfg = self.get_configuration() or {}
         excel_opts = (cfg.get("excel") or {}).copy()
         sheet_name = excel_opts.pop("sheet", excel_opts.pop("sheet_name", "Sheet1"))
-        split_by = cfg.get("split_by")
+        split_by = excel_opts.pop("split_by", None) or cfg.get("split_by")
 
-        df = self._tabular_export_dataframe()
+        df = self._spreadsheet_dataframe()
         buffer = BytesIO()
 
         if split_by and not df.empty:

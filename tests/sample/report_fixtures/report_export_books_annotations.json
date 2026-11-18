@@ -1,0 +1,107 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "01f95812-4ef2-43b7-95e8-309e8045dcd5",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.401Z",
+        "updated_at": "2026-11-17T13:51:20.405Z",
+        "direction": "export",
+        "name": "Sample fixture — Books (annotation)",
+        "named_id": "sample-fixture-books-annotation",
+        "description": "Manager path objects.with_title_len adds title_len, usable as a column and in order_by.",
+        "target": [
+          "sample",
+          "book"
+        ],
+        "manager": "objects.with_title_len",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [
+          "-title_len"
+        ],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 14,
+      "fields": {
+        "configuration": {
+          "annotation_columns": [
+            "title_len"
+          ],
+          "title_len_label": "Title length"
+        },
+        "columns": [
+          "title",
+          "title_len"
+        ],
+        "definition": "01f95812-4ef2-43b7-95e8-309e8045dcd5",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 20,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 14,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 21,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 14,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 15,
+      "fields": {
+        "configuration": {
+          "annotation_columns": [
+            "title_len"
+          ],
+          "title_len_label": "Title length"
+        },
+        "columns": [
+          "title",
+          "title_len"
+        ],
+        "definition": "01f95812-4ef2-43b7-95e8-309e8045dcd5",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 22,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 15,
+        "format_key": "json",
+        "template": ""
+      }
+    }
+  ]
+}

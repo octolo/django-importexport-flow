@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from django_importexport_flow.tasks import execute_export_request_by_uuid, execute_import_request_by_uuid
+from django_importexport_flow.tasks import (
+    execute_export_request_by_uuid,
+    execute_import_request_by_uuid,
+)
 
 
 class SyncBackend:

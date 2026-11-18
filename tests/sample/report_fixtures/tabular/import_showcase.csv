@@ -1,0 +1,2 @@
+char_f,email_f,int_f,bool_f,date_f,uuid_f,json_f,ip_f
+showcase,ada2@example.com,7,true,2024-05-01,12345678-1234-5678-1234-567812345679,"{""k"": 1}",10.0.0.1

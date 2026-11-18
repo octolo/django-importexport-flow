@@ -7,61 +7,65 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
 from django_importexport_flow.models import (
-    ExportConfigPdf,
-    ExportConfigTable,
-    ExportDefinition,
+    Definition,
 )
 from django_importexport_flow.utils.serialization import (
     import_export_configuration,
     serialize_export_configuration,
 )
 from tests.sample.models import Book
+from tests.support import attach_pdf_export, attach_tabular_export
 
 
 @pytest.mark.django_db
 def test_import_export_configuration_roundtrip():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Roundtrip",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(
+    attach_pdf_export(
         export=definition,
         template="<html>a</html>",
         configuration={"x": 1},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={"json": {"indent": 4}},
     )
     payload = serialize_export_configuration(definition)
-    ExportDefinition.objects.all().delete()
-    assert ExportDefinition.objects.count() == 0
+    Definition.objects.all().delete()
+    assert Definition.objects.count() == 0
 
     loaded = import_export_configuration(payload)
     assert loaded.name == "Roundtrip"
     assert loaded.target_id == ct.id
-    assert loaded.config_pdf.template == "<html>a</html>"
-    assert loaded.config_table.columns[0] == "title"
-    assert loaded.config_table.configuration["json"]["indent"] == 4
+    from django_importexport_flow.engine.core.formats import get_export_category, get_export_config
+
+    assert get_export_config(loaded, "pdf").template == "<html>a</html>"
+    assert get_export_category(loaded, "json").columns[0] == "title"
+    assert get_export_config(loaded, "json").configuration["indent"] == 4
 
 
 @pytest.mark.django_db
 def test_import_export_configuration_replaces_when_name_exists():
     ct = ContentType.objects.get_for_model(Book)
-    source = ExportDefinition.objects.create(
+    source = Definition.objects.create(
+        direction="export",
         name="Match",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(export=source, template="<p>s</p>", configuration={"k": 1})
+    attach_pdf_export(export=source, template="<p>s</p>", configuration={"k": 1})
     payload = serialize_export_configuration(source)
     source.delete()
-    existing = ExportDefinition.objects.create(
+    existing = Definition.objects.create(
+        direction="export",
         name="Match",
         target=ct,
         manager="objects.all",
@@ -72,8 +76,10 @@ def test_import_export_configuration_replaces_when_name_exists():
     assert loaded.name == "Match"
     assert loaded.manager == "objects"
     assert loaded.filter_config == {}
-    assert loaded.config_pdf.template == "<p>s</p>"
-    assert ExportDefinition.objects.count() == 1
+    from django_importexport_flow.engine.core.formats import get_export_config
+
+    assert get_export_config(loaded, "pdf").template == "<p>s</p>"
+    assert Definition.objects.count() == 1
 
 
 @pytest.mark.django_db
@@ -81,16 +87,18 @@ def test_import_json_admin_post_changelist(client):
     User = get_user_model()
     User.objects.create_superuser("admin", "admin@test.local", "secret")
     ct = ContentType.objects.get_for_model(Book)
-    source = ExportDefinition.objects.create(
+    source = Definition.objects.create(
+        direction="export",
         name="From file",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(export=source, template="", configuration={})
+    attach_pdf_export(export=source, template="", configuration={})
     payload = serialize_export_configuration(source)
     source.delete()
-    target = ExportDefinition.objects.create(
+    target = Definition.objects.create(
+        direction="export",
         name="From file",
         target=ct,
         manager="objects",
@@ -107,7 +115,7 @@ def test_import_json_admin_post_changelist(client):
     assert response.status_code == 200
     target.refresh_from_db()
     assert target.name == "From file"
-    assert ExportDefinition.objects.count() == 1
+    assert Definition.objects.count() == 1
 
 
 @pytest.mark.django_db

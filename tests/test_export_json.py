@@ -6,17 +6,34 @@ from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
 
 from django_importexport_flow.models import (
-    ExportConfigPdf,
-    ExportConfigTable,
-    ExportDefinition,
+    Definition,
 )
 from django_importexport_flow.utils.helpers import configuration_json_download_filename
 from django_importexport_flow.utils.serialization import serialize_export_configuration
 from tests.sample.models import Book
+from tests.support import attach_pdf_export, attach_tabular_export
 
 
 def _models_in_export(data: dict) -> set[str]:
     return {o["model"] for o in data["objects"]}
+
+
+def _by_format(data: dict, format_key: str) -> dict:
+    return next(
+        obj
+        for obj in data["objects"]
+        if obj["model"] == "django_importexport_flow.formatconfig"
+        and obj["fields"]["format_key"] == format_key
+    )
+
+
+def _by_category(data: dict, category_key: str) -> dict:
+    return next(
+        obj
+        for obj in data["objects"]
+        if obj["model"] == "django_importexport_flow.categoryconfig"
+        and obj["fields"]["category_key"] == category_key
+    )
 
 
 @pytest.mark.django_db
@@ -25,18 +42,19 @@ def test_export_json_admin_boost_view(client):
     User.objects.create_superuser("admin", "admin@test.local", "secret")
 
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Export test",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(
+    attach_pdf_export(
         export=definition,
         template="<html></html>",
         configuration={"a": 1},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={"csv": {"delimiter": ";"}},
@@ -54,116 +72,122 @@ def test_export_json_admin_boost_view(client):
     definition.refresh_from_db()
     assert configuration_json_download_filename(definition) in (r.get("Content-Disposition") or "")
     data = json.loads(r.content)
-    assert data["format_version"] == 1
+    assert data["format_version"] == 2
     objs = data["objects"]
-    defn = next(o for o in objs if o["model"] == "django_importexport_flow.exportdefinition")
+    defn = next(o for o in objs if o["model"] == "django_importexport_flow.definition")
     assert defn["fields"]["name"] == "Export test"
     assert defn["fields"]["target"] == ct.pk
-    pdf = next(o for o in objs if o["model"] == "django_importexport_flow.exportconfigpdf")
+    pdf = _by_format(data, "pdf")
     assert pdf["fields"]["template"] == "<html></html>"
-    table = next(o for o in objs if o["model"] == "django_importexport_flow.exportconfigtable")
-    assert table["fields"]["columns"][0] == "title"
-    assert table["fields"]["configuration"]["csv"]["delimiter"] == ";"
+    sheet = _by_category(data, "spreadsheet")
+    assert sheet["fields"]["columns"][0] == "title"
+    csv = _by_format(data, "csv")
+    assert csv["fields"]["configuration"]["delimiter"] == ";"
 
 
 @pytest.mark.django_db
 def test_serialize_export_configuration_includes_pdf_and_table():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Full",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(
+    attach_pdf_export(
         export=definition,
         template="<p>x</p>",
         configuration={"pdf": True},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["id"],
         configuration={"csv": {"delimiter": ","}, "json": {"indent": None}},
     )
     data = serialize_export_configuration(definition)
-    assert data["format_version"] == 1
+    assert data["format_version"] == 2
     assert _models_in_export(data) == {
-        "django_importexport_flow.exportdefinition",
-        "django_importexport_flow.exportconfigpdf",
-        "django_importexport_flow.exportconfigtable",
+        "django_importexport_flow.definition",
+        "django_importexport_flow.categoryconfig",
+        "django_importexport_flow.formatconfig",
     }
-    pdf = next(
-        o for o in data["objects"] if o["model"] == "django_importexport_flow.exportconfigpdf"
-    )
+    pdf = _by_format(data, "pdf")
     assert pdf["fields"]["template"] == "<p>x</p>"
     assert pdf["fields"]["configuration"] == {"pdf": True}
-    table = next(
-        o for o in data["objects"] if o["model"] == "django_importexport_flow.exportconfigtable"
-    )
-    assert table["fields"]["columns"][0] == "id"
-    assert table["fields"]["configuration"]["csv"]["delimiter"] == ","
-    assert table["fields"]["configuration"]["json"]["indent"] is None
+    sheet = _by_category(data, "spreadsheet")
+    assert sheet["fields"]["columns"][0] == "id"
+    csv = _by_format(data, "csv")
+    assert csv["fields"]["configuration"]["delimiter"] == ","
+    exported_json = _by_format(data, "json")
+    assert exported_json["fields"]["configuration"]["indent"] is None
 
 
 @pytest.mark.django_db
 def test_serialize_export_configuration_pdf_only():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Pdf only",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigPdf.objects.create(
+    attach_pdf_export(
         export=definition,
         template="",
         configuration={},
     )
     data = serialize_export_configuration(definition)
     assert _models_in_export(data) == {
-        "django_importexport_flow.exportdefinition",
-        "django_importexport_flow.exportconfigpdf",
+        "django_importexport_flow.definition",
+        "django_importexport_flow.categoryconfig",
+        "django_importexport_flow.formatconfig",
     }
 
 
 @pytest.mark.django_db
 def test_serialize_export_configuration_table_only():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Table only",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=[],
         configuration={},
     )
     data = serialize_export_configuration(definition)
     assert _models_in_export(data) == {
-        "django_importexport_flow.exportdefinition",
-        "django_importexport_flow.exportconfigtable",
+        "django_importexport_flow.definition",
+        "django_importexport_flow.categoryconfig",
+        "django_importexport_flow.formatconfig",
     }
 
 
 @pytest.mark.django_db
 def test_serialize_export_configuration_definition_only():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Bare",
         target=ct,
         manager="objects",
         filter_config={},
     )
     data = serialize_export_configuration(definition)
-    assert _models_in_export(data) == {"django_importexport_flow.exportdefinition"}
+    assert _models_in_export(data) == {"django_importexport_flow.definition"}
 
 
 @pytest.mark.django_db
 def test_export_json_admin_forbidden_for_anonymous(client):
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="X",
         target=ct,
         manager="objects",

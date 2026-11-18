@@ -22,7 +22,9 @@ def read_uploaded_file(uploaded_file: Any, max_bytes: int) -> pd.DataFrame:
     return read_import_bytes(raw, name, max_bytes)
 
 
-def read_import_filefield(file_field: models.FileField, max_bytes: int) -> pd.DataFrame:
+def read_import_filefield(
+    file_field: models.fields.files.FieldFile, max_bytes: int
+) -> pd.DataFrame:
     with file_field.open("rb") as f:
         raw = f.read()
     name = getattr(file_field, "name", "") or ""

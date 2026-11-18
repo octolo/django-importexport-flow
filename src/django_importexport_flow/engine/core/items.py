@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
+from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.db import models
 
 from ...utils.helpers import (
@@ -14,6 +15,10 @@ from ...utils.helpers import (
     normalize_table_column,
     parse_reverse_expand_spec,
 )
+
+
+def _model_objects(model: type[models.Model]) -> models.Manager:
+    return cast("models.Manager[Any]", model.objects)  # type: ignore[attr-defined]
 
 
 def _tree_set_dotted(tree: dict, dotted: str, value: Any) -> None:
@@ -66,7 +71,8 @@ def _save_related_from_tree(rel_model: type[models.Model], tree: dict) -> Any:
             defaults[ck] = _coerce_cell_to_field(cf, cv)
         if not defaults:
             continue
-        child_model.objects.update_or_create(**{fk_to_parent: inst}, defaults=defaults)
+        lookup: dict[str, Any] = {str(fk_to_parent): inst}
+        _model_objects(child_model).update_or_create(**lookup, defaults=defaults)
     return inst
 
 
@@ -100,17 +106,14 @@ def import_row_slots_need_post_create(
     return False
 
 
-def _resolve_or_create_m2m_related(
-    rel_model: type[models.Model],
-    tree: dict[str, Any],
-) -> Any:
+def _nested_m2m_scalars(rel_model: type[models.Model], tree: dict[str, Any]) -> dict[str, Any]:
     scalars: dict[str, Any] = {}
     forward_nested: dict[str, dict[str, Any]] = {}
-    for k, v in tree.items():
-        if isinstance(v, dict):
-            forward_nested[k] = v
+    for key, value in tree.items():
+        if isinstance(value, dict):
+            forward_nested[key] = value
         else:
-            scalars[k] = v
+            scalars[key] = value
     for fk_name, sub_tree in forward_nested.items():
         fk_field = get_field_or_accessor(rel_model, fk_name)
         if fk_field is None:
@@ -118,35 +121,50 @@ def _resolve_or_create_m2m_related(
         if getattr(fk_field, "many_to_one", False) or getattr(fk_field, "one_to_one", False):
             remote = fk_field.remote_field.model
             scalars[fk_name] = _save_related_from_tree(remote, sub_tree)
-    for k in list(scalars):
-        f = get_field_or_accessor(rel_model, k)
-        if f is None:
-            scalars.pop(k, None)
+    return _coerce_m2m_scalars(rel_model, scalars)
+
+
+def _coerce_m2m_scalars(rel_model: type[models.Model], scalars: dict[str, Any]) -> dict[str, Any]:
+    for key in list(scalars):
+        field = get_field_or_accessor(rel_model, key)
+        if field is None:
+            scalars.pop(key, None)
             continue
-        if getattr(f, "is_relation", False):
-            if isinstance(scalars[k], models.Model):
-                continue
-            scalars.pop(k, None)
+        if getattr(field, "is_relation", False):
+            if not isinstance(scalars[key], models.Model):
+                scalars.pop(key, None)
             continue
-        scalars[k] = _coerce_cell_to_field(f, scalars[k])
-    if not scalars:
-        return None
+        scalars[key] = _coerce_cell_to_field(field, scalars[key])
+    return scalars
+
+
+def _existing_m2m_match(rel_model: type[models.Model], scalars: dict[str, Any]) -> Any:
     for fname, val in list(scalars.items()):
-        f = get_field_or_accessor(rel_model, fname)
-        if f is not None and getattr(f, "unique", False):
-            others = {k: v for k, v in scalars.items() if k != fname}
-            obj, _ = rel_model.objects.get_or_create(**{fname: val}, defaults=others)
+        field = get_field_or_accessor(rel_model, fname)
+        if field is not None and getattr(field, "unique", False):
+            others = {key: value for key, value in scalars.items() if key != fname}
+            obj, _created = _model_objects(rel_model).get_or_create(**{fname: val}, defaults=others)
             return obj
     if len(scalars) == 1:
-        k, v = next(iter(scalars.items()))
-        existing = rel_model.objects.filter(**{k: v}).first()
+        key, value = next(iter(scalars.items()))
+        existing = _model_objects(rel_model).filter(**{key: value}).first()
         if existing:
             return existing
-        return rel_model.objects.create(**scalars)
-    existing = rel_model.objects.filter(**scalars).first()
+        return _model_objects(rel_model).create(**scalars)
+    existing = _model_objects(rel_model).filter(**scalars).first()
     if existing:
         return existing
-    return rel_model.objects.create(**scalars)
+    return _model_objects(rel_model).create(**scalars)
+
+
+def _resolve_or_create_m2m_related(
+    rel_model: type[models.Model],
+    tree: dict[str, Any],
+) -> Any:
+    scalars = _nested_m2m_scalars(rel_model, tree)
+    if not scalars:
+        return None
+    return _existing_m2m_match(rel_model, scalars)
 
 
 def _coerce_scalars_for_child_create(
@@ -198,7 +216,7 @@ def _apply_slot_relations(
                 scalars = _coerce_scalars_for_child_create(child_model, tree)
                 if not scalars:
                     continue
-                child_model.objects.create(**{parent_fk_name: instance, **scalars})
+                _model_objects(child_model).create(**{parent_fk_name: instance, **scalars})
 
 
 def _scalar_model_kwargs(
@@ -211,63 +229,87 @@ def _scalar_model_kwargs(
     nested_by_root: dict[str, list[str]] = {}
     m2m_slots: dict[str, dict[int, dict[str, Any]]] = {}
 
-    for i, spec in enumerate(column_paths):
-        if parse_reverse_expand_spec(str(spec)):
-            continue
-        path = normalize_table_column(str(spec))
-        m = M2M_SLOT_PATH_PATTERN.match(path)
-        if m:
-            rel_name, slot_s, rest = m.groups()
-            slot_i = int(slot_s)
-            raw = _row_cell_at(row, i)
-            _tree_set_dotted(
-                m2m_slots.setdefault(rel_name, {}).setdefault(slot_i, {}),
-                rest,
-                raw,
-            )
-            continue
-        if "." in path:
-            root = path.split(".", 1)[0]
-            nested_by_root.setdefault(root, []).append(path)
-            continue
-        try:
-            field = model._meta.get_field(path)
-        except Exception:
-            continue
-        raw = _row_cell_at(row, i)
-        if pd.isna(raw):
-            if field.null:
-                kwargs[path] = None
-            continue
-        if isinstance(raw, str) and not raw.strip() and field.null:
-            kwargs[path] = None
-            continue
-        try:
-            if hasattr(field, "to_python"):
-                kwargs[path] = field.to_python(str(raw).strip() if raw is not None else raw)
-            else:
-                kwargs[path] = raw
-        except Exception:
-            kwargs[path] = raw
+    for index, spec in enumerate(column_paths):
+        _collect_scalar_column(model, row, spec, index, kwargs, nested_by_root, m2m_slots)
+    _apply_nested_relations(model, row, column_paths, nested_by_root, kwargs)
+    return kwargs, m2m_slots
 
-    path_to_index = {normalize_table_column(str(p)): i for i, p in enumerate(column_paths)}
+
+def _collect_scalar_column(
+    model: type[models.Model],
+    row: pd.Series,
+    spec: str,
+    index: int,
+    kwargs: dict[str, Any],
+    nested_by_root: dict[str, list[str]],
+    m2m_slots: dict[str, dict[int, dict[str, Any]]],
+) -> None:
+    if parse_reverse_expand_spec(str(spec)):
+        return
+    path = normalize_table_column(str(spec))
+    slot = M2M_SLOT_PATH_PATTERN.match(path)
+    if slot:
+        rel_name, slot_s, rest = slot.groups()
+        _tree_set_dotted(
+            m2m_slots.setdefault(rel_name, {}).setdefault(int(slot_s), {}),
+            rest,
+            _row_cell_at(row, index),
+        )
+        return
+    if "." in path:
+        nested_by_root.setdefault(path.split(".", 1)[0], []).append(path)
+        return
+    try:
+        field = model._meta.get_field(path)
+    except FieldDoesNotExist:
+        return
+    _assign_scalar_value(kwargs, path, field, _row_cell_at(row, index))
+
+
+def _assign_scalar_value(kwargs: dict[str, Any], path: str, field: Any, raw: Any) -> None:
+    if pd.isna(raw):
+        if field.null:
+            kwargs[path] = None
+        return
+    if isinstance(raw, str) and not raw.strip() and field.null:
+        kwargs[path] = None
+        return
+    try:
+        if hasattr(field, "to_python"):
+            kwargs[path] = field.to_python(str(raw).strip() if raw is not None else raw)
+        else:
+            kwargs[path] = raw
+    except (TypeError, ValueError, ValidationError):
+        kwargs[path] = raw
+
+
+def _apply_nested_relations(
+    model: type[models.Model],
+    row: pd.Series,
+    column_paths: list[str],
+    nested_by_root: dict[str, list[str]],
+    kwargs: dict[str, Any],
+) -> None:
+    path_to_index = {
+        normalize_table_column(str(path)): index for index, path in enumerate(column_paths)
+    }
     for root, paths in nested_by_root.items():
-        fk_field = get_field_or_accessor(model, root)
-        if fk_field is None or not getattr(fk_field, "is_relation", False):
-            continue
-        if not (getattr(fk_field, "many_to_one", False) or getattr(fk_field, "one_to_one", False)):
-            continue
-        rel_model = _next_model_for_rel_field(fk_field)
-        if rel_model is None:
+        related = _forward_relation_model(model, root)
+        if related is None:
             continue
         tree: dict[str, Any] = {}
         for full_path in paths:
-            rest = full_path.split(".", 1)[1]
-            idx = path_to_index.get(normalize_table_column(str(full_path)))
-            if idx is None:
+            index = path_to_index.get(normalize_table_column(str(full_path)))
+            if index is None:
                 continue
-            raw = _row_cell_at(row, idx)
-            _tree_set_dotted(tree, rest, raw)
-        kwargs[root] = _save_related_from_tree(rel_model, tree)
+            _tree_set_dotted(tree, full_path.split(".", 1)[1], _row_cell_at(row, index))
+        kwargs[root] = _save_related_from_tree(related, tree)
 
-    return kwargs, m2m_slots
+
+def _forward_relation_model(model: type[models.Model], root: str) -> type[models.Model] | None:
+    field = get_field_or_accessor(model, root)
+    if field is None or not getattr(field, "is_relation", False):
+        return None
+    if not (getattr(field, "many_to_one", False) or getattr(field, "one_to_one", False)):
+        return None
+    return _next_model_for_rel_field(field)

@@ -1,0 +1,118 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "f8b0dcdc-c3ca-4658-929a-88157086f676",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.406Z",
+        "updated_at": "2026-11-17T13:51:20.406Z",
+        "direction": "export",
+        "name": "Sample fixture — Books (pdf)",
+        "named_id": "sample-fixture-books-pdf",
+        "description": "HTML template rendered with object_list.",
+        "target": [
+          "sample",
+          "book"
+        ],
+        "manager": "objects",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [
+          "title"
+        ],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 18,
+      "fields": {
+        "configuration": {},
+        "columns": [],
+        "definition": "f8b0dcdc-c3ca-4658-929a-88157086f676",
+        "category_key": "document"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 26,
+      "fields": {
+        "configuration": {
+          "orientation": "landscape"
+        },
+        "hook": [],
+        "category_config": 18,
+        "format_key": "pdf",
+        "template": "<ul>{% for obj in object_list %}<li>{{ obj.title }}</li>{% endfor %}</ul>"
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 16,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title"
+        ],
+        "definition": "f8b0dcdc-c3ca-4658-929a-88157086f676",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 23,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 16,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 24,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 16,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 17,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title"
+        ],
+        "definition": "f8b0dcdc-c3ca-4658-929a-88157086f676",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 25,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 17,
+        "format_key": "json",
+        "template": ""
+      }
+    }
+  ]
+}

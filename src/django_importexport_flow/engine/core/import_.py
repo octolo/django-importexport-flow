@@ -18,8 +18,8 @@ See ``docs/purpose.md`` (Legacy naming).
 
 from __future__ import annotations
 
-from ...utils.helpers import dataframe_preview_table  # noqa: F401
-
+from ...task import dispatch_import_request
+from ...utils.helpers import dataframe_preview_table
 from .io import (
     read_import_bytes,
     read_import_filefield,
@@ -39,7 +39,6 @@ from .preview import (
     normalize_import_dataframe,
     validate_import_preview,
 )
-from ...task import dispatch_import_request
 from .run import (
     create_import_request,
     relaunch_import_request,
@@ -60,20 +59,20 @@ __all__ = [
     "DEFAULT_IMPORT_MAX_RELATION_HOPS",
     "DEFAULT_M2M_IMPORT_SLOTS",
     "IMPORT_COLUMN_PATHS_KEY",
-    "dispatch_import_request",
     "create_import_ask",
     "create_import_request",
     "dataframe_preview_table",
     "default_importable_column_paths",
+    "dispatch_import_request",
     "effective_import_column_paths",
     "infer_column_paths_from_headers",
     "normalize_import_dataframe",
     "normalize_tabular_import_dataframe",
     "read_import_bytes",
     "read_import_filefield",
-    "read_uploaded_file",
     "read_tabular_from_bytes",
     "read_tabular_from_storage_filefield",
+    "read_uploaded_file",
     "read_uploaded_tabular",
     "relaunch_import_ask",
     "relaunch_import_request",

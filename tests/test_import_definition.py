@@ -1,4 +1,4 @@
-"""Tests for ImportDefinition paths, wizard/admin flows, and legacy JSON labels.
+"""Tests for Definition paths, wizard/admin flows, and legacy JSON labels.
 
 Formerly ``test_report_import.py`` (django-reporting naming).
 """
@@ -22,8 +22,8 @@ from django_importexport_flow.engine.core.import_ import (
     sample_headers_for_import_definition,
     validate_import_preview,
 )
-from django_importexport_flow.utils.helpers import resolve_table_column_label
-from django_importexport_flow.models import ImportDefinition
+from django_importexport_flow.models import Definition
+from django_importexport_flow.utils.helpers import resolve_column_header
 from django_importexport_flow.utils.serialization import (
     import_import_definition,
     serialize_import_definition,
@@ -47,17 +47,18 @@ def test_default_import_paths_author_includes_reverse_fk_slots():
 
 
 @pytest.mark.django_db
-def test_resolve_table_column_label_book_set_slot():
-    from django_importexport_flow.utils.helpers import resolve_table_column_label
+def test_resolve_column_header_book_set_slot():
+    from django_importexport_flow.utils.helpers import resolve_column_header
 
-    assert "Book title" in resolve_table_column_label(Author, "book_set.0.title")
+    assert "Book title" in resolve_column_header(Author, "book_set.0.title")
 
 
 @pytest.mark.django_db
 def test_effective_import_paths_respects_max_relation_hops():
     """Hop limit trims nested paths (author.profile.bio, tags.0.category.name)."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Hop cap",
         target=ct,
         max_relation_hops=1,
@@ -76,7 +77,8 @@ def test_effective_import_paths_respects_max_relation_hops():
 def test_effective_import_paths_zero_hops_excludes_nested_and_slots():
     """0 hops: no nested FK, M2M slots, or reverse-O2M slot columns."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Zero hops",
         target=ct,
         max_relation_hops=0,
@@ -89,7 +91,8 @@ def test_effective_import_paths_zero_hops_excludes_nested_and_slots():
     assert "tags.0.name" not in paths
 
     ct_a = ContentType.objects.get_for_model(Author)
-    ri_a = ImportDefinition.objects.create(
+    ri_a = Definition.objects.create(
+        direction="import",
         name="Zero hops author",
         target=ct_a,
         max_relation_hops=0,
@@ -119,22 +122,25 @@ def test_default_import_paths_book_no_id_bare_author_or_author_pk():
 
 
 @pytest.mark.django_db
-def test_resolve_table_column_label_author_profile_bio():
-    from django_importexport_flow.utils.helpers import resolve_table_column_label
+def test_resolve_column_header_author_profile_bio():
+    from django_importexport_flow.utils.helpers import resolve_column_header
 
-    assert resolve_table_column_label(Book, "author.profile.bio") == "Biography"
+    assert resolve_column_header(Book, "author.profile.bio") == "Biography"
 
 
 @pytest.mark.django_db
 def test_table_engine_with_import_definition():
     ct = ContentType.objects.get_for_model(Book)
     book = Book.objects.create(title="Guide", pages=42)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Books import",
         target=ct,
         columns_exclude=_book_columns_exclude_all_but("title", "pages"),
-        configuration={"csv": {"delimiter": ";"}, "excel": {"sheet": "Data"}},
     )
+    from tests.support import attach_import_spreadsheet
+
+    attach_import_spreadsheet(ri, {"csv": {"delimiter": ";"}, "excel": {"sheet": "Data"}})
     engine = ExportTableEngine(ri)
     title_v = str(Book._meta.get_field("title").verbose_name)
     pages_v = str(Book._meta.get_field("pages").verbose_name)
@@ -150,7 +156,8 @@ def test_import_definition_filter_config_limits_queryset():
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="A", pages=1)
     b2 = Book.objects.create(title="B", pages=2)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Scoped",
         target=ct,
         filter_config={"pages": 2},
@@ -163,16 +170,22 @@ def test_import_definition_filter_config_limits_queryset():
 @pytest.mark.django_db
 def test_serialize_import_roundtrip():
     ct = ContentType.objects.get_for_model(Book)
-    ImportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="import",
         name="Roundtrip",
         target=ct,
         columns_exclude=["title"],
-        configuration={"csv": {"delimiter": "|"}},
     )
-    data = serialize_import_definition(ImportDefinition.objects.get(name="Roundtrip"))
-    assert data["format_version"] == 1
-    assert len(data["objects"]) == 1
-    assert data["objects"][0]["model"] == "django_importexport_flow.importdefinition"
+    from tests.support import attach_import_spreadsheet
+
+    attach_import_spreadsheet(definition, {"csv": {"delimiter": "|"}})
+    data = serialize_import_definition(Definition.objects.get(name="Roundtrip"))
+    assert data["format_version"] == 2
+    assert {obj["model"] for obj in data["objects"]} >= {
+        "django_importexport_flow.definition",
+        "django_importexport_flow.categoryconfig",
+        "django_importexport_flow.formatconfig",
+    }
 
     payload = copy.deepcopy(data)
     payload["objects"][0]["pk"] = "00000000-0000-0000-0000-000000009999"
@@ -180,7 +193,9 @@ def test_serialize_import_roundtrip():
     assert str(loaded.pk) != "00000000-0000-0000-0000-000000009999"
     assert loaded.name == "Roundtrip"
     assert loaded.columns_exclude == ["title"]
-    assert loaded.configuration["csv"]["delimiter"] == "|"
+    from django_importexport_flow.engine.core.formats import get_import_config
+
+    assert get_import_config(loaded, "csv").configuration["delimiter"] == "|"
 
     again = import_import_definition(serialize_import_definition(loaded))
     assert again.pk == loaded.pk
@@ -188,8 +203,8 @@ def test_serialize_import_roundtrip():
 
 
 @pytest.mark.django_db
-def test_import_definition_legacy_json_label_still_loads():
-    """Exports saved with the old ``django_reporting.reportimport`` label deserialize."""
+def test_import_definition_legacy_json_label_is_rejected():
+    """Payloads from the previous format version are not imported."""
     ct = ContentType.objects.get_for_model(Book)
     payload = {
         "format_version": 1,
@@ -212,9 +227,8 @@ def test_import_definition_legacy_json_label_still_loads():
             }
         ],
     }
-    loaded = import_import_definition(payload)
-    assert loaded.name == "Legacy label"
-    assert loaded.columns_exclude == []
+    with pytest.raises(ValueError, match="Old payloads"):
+        import_import_definition(payload)
 
 
 @pytest.mark.django_db
@@ -222,12 +236,15 @@ def test_import_definition_admin_sample_downloads(client):
     User = get_user_model()
     User.objects.create_superuser("admin", "admin@test.local", "secret")
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Sample / books",
         target=ct,
         columns_exclude=_book_columns_exclude_all_but("title", "pages"),
-        configuration={"csv": {"delimiter": ";"}},
     )
+    from tests.support import attach_import_spreadsheet
+
+    attach_import_spreadsheet(ri, {"csv": {"delimiter": ";"}})
     client.login(username="admin", password="secret")
     base = "admin:django_importexport_flow_importdefinition"
     title_v = str(Book._meta.get_field("title").verbose_name)
@@ -260,12 +277,15 @@ def test_import_data_admin_form_uses_multipart_enctype(client):
     User = get_user_model()
     User.objects.create_superuser("admin", "admin@test.local", "secret")
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="CSV import",
         target=ct,
         columns_exclude=_book_columns_exclude_all_but("title", "pages"),
-        configuration={"csv": {"delimiter": ","}},
     )
+    from tests.support import attach_import_spreadsheet
+
+    attach_import_spreadsheet(ri, {"csv": {"delimiter": ","}})
     client.login(username="admin", password="secret")
     url = reverse(
         "admin:django_importexport_flow_importdefinition_import_tabular_data",
@@ -285,7 +305,8 @@ def test_resolve_import_column_paths_accepts_label_subset_like_fixture_csv():
     import pandas as pd
 
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Full paths def",
         target=ct,
         columns_exclude=[],
@@ -314,7 +335,8 @@ def test_resolve_import_column_paths_accepts_label_subset_like_fixture_csv():
 def test_resolve_columns_use_effective_paths_matching_example():
     """Resolved paths equal :func:`effective_import_column_paths` (same order as example file)."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Effective cols",
         target=ct,
         columns_exclude=[],
@@ -332,7 +354,8 @@ def test_resolve_columns_use_effective_paths_matching_example():
 def test_resolve_columns_respects_columns_exclude_for_subset():
     """Only title, pages, and price when other paths are excluded."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Subset nested",
         target=ct,
         columns_exclude=_book_columns_exclude_all_but("title", "pages", "price"),
@@ -349,7 +372,8 @@ def test_resolve_columns_respects_columns_exclude_for_subset():
 def test_exclude_relation_excludes_all_nested_paths():
     """Excluding a FK field name drops the relation column and every ``relation.*`` path."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="No author relation",
         target=ct,
         columns_exclude=["author"],
@@ -365,7 +389,8 @@ def test_exclude_relation_excludes_all_nested_paths():
 def test_exclude_m2m_excludes_all_slot_paths():
     """Excluding an M2M field name drops every ``tags.N.*`` slot column."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="No tags",
         target=ct,
         columns_exclude=["tags"],
@@ -380,14 +405,15 @@ def test_exclude_m2m_excludes_all_slot_paths():
 def test_validate_import_preview_accepts_m2m_header_prefix():
     """M2M slot headers may extend the subfield verbose name (e.g. ``Tag label`` prefix)."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="M2M headers",
         target=ct,
         columns_exclude=_book_columns_exclude_all_but("title", "tags.0.name", "tags.1.name"),
         filter_config={},
     )
-    h0 = resolve_table_column_label(Book, "tags.0.name")
-    h1 = resolve_table_column_label(Book, "tags.1.name")
+    h0 = resolve_column_header(Book, "tags.0.name")
+    h1 = resolve_column_header(Book, "tags.1.name")
     title_v = str(Book._meta.get_field("title").verbose_name)
     df = pd.DataFrame(
         [
@@ -406,7 +432,8 @@ def test_validate_import_preview_accepts_m2m_header_prefix():
 def test_validate_import_preview_path_headers_strip_label_row():
     """CSV line 1 = paths, line 2 = translations: second row is skipped as data."""
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="Two-line header",
         target=ct,
         columns_exclude=_book_columns_exclude_all_but("title", "tags.0.name", "tags.1.name"),
@@ -430,7 +457,8 @@ def test_create_import_ask_stores_inferred_column_paths():
     User = get_user_model()
     user = User.objects.create_user("u2", "u2@example.com", "x")
     ct = ContentType.objects.get_for_model(Book)
-    ri = ImportDefinition.objects.create(
+    ri = Definition.objects.create(
+        direction="import",
         name="RI2",
         target=ct,
         filter_config={},

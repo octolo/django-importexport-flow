@@ -6,21 +6,23 @@ from django_importexport_flow.engine.core.export import (
     attach_export_url_kwargs,
     build_request_with_get,
 )
-from django_importexport_flow.models import ExportConfigTable, ExportDefinition
+from django_importexport_flow.models import Definition
 from tests.sample.models import Book
+from tests.support import attach_tabular_export
 
 
 @pytest.mark.django_db
 def test_filter_mandatory_kwargs_from_attach():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="URL kw",
         target=ct,
         manager="objects",
         filter_config={},
         filter_mandatory={"kwargs": {"n": "pages"}},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -36,14 +38,15 @@ def test_filter_mandatory_kwargs_from_attach():
 @pytest.mark.django_db
 def test_filter_mandatory_kwargs_missing_raises():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="URL kw missing",
         target=ct,
         manager="objects",
         filter_config={},
         filter_mandatory={"kwargs": {"n": "pages"}},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},

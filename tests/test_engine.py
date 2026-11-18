@@ -8,25 +8,23 @@ from django.core.exceptions import ValidationError
 
 from django_importexport_flow.engine import ExportPdfEngine, ExportTableEngine
 from django_importexport_flow.engine.core import CoreEngine
-from django_importexport_flow.models import (
-    ExportConfigPdf,
-    ExportConfigTable,
-    ExportDefinition,
-)
+from django_importexport_flow.models import CategoryConfig, Definition
 from tests.sample.models import Author, Book
+from tests.support import attach_pdf_export, attach_tabular_export
 
 
 @pytest.mark.django_db
 def test_table_engine_rows_and_headers():
     ct = ContentType.objects.get_for_model(Book)
     book = Book.objects.create(title="Guide", pages=42)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "pages"],
         configuration={"csv": {"delimiter": ";"}, "excel": {"sheet": "Data"}},
@@ -45,13 +43,14 @@ def test_table_engine_rows_and_headers():
 def test_table_engine_excel_column_count_matches_headers():
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="Guide", pages=42)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books xlsx",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "pages", "metadata"],
         configuration={"excel": {"sheet": "Data"}},
@@ -69,14 +68,15 @@ def test_table_engine_order_by():
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="A", pages=1)
     Book.objects.create(title="Z", pages=2)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books ordered",
         target=ct,
         manager="objects",
         filter_config={},
         order_by=["-title"],
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -90,13 +90,14 @@ def test_table_engine_string_columns_verbose_and_nested_path():
     ct = ContentType.objects.get_for_model(Book)
     author = Author.objects.create(name="Ada")
     Book.objects.create(title="Guide", pages=42, author=author)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books nested",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "pages", "author.name", "metadata.nope"],
         configuration={},
@@ -131,13 +132,14 @@ def test_table_engine_reverse_expand_columns():
     title_v = str(Book._meta.get_field("title").verbose_name)
     pages_v = str(Book._meta.get_field("pages").verbose_name)
     author_name_v = str(Author._meta.get_field("name").verbose_name)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Authors",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["name", f"{rev_name}.*[title:pages]"],
         configuration={},
@@ -166,14 +168,15 @@ def test_table_engine_jsonfield_whole_dict_nested_and_list():
         "tags": ["alpha", "beta"],
     }
     Book.objects.create(title="T", pages=1, metadata=meta)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="JSON columns",
         target=ct,
         manager="objects",
         filter_config={},
     )
     meta_v = str(Book._meta.get_field("metadata").verbose_name)
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=[
             "metadata",
@@ -206,19 +209,20 @@ def test_table_engine_jsonfield_whole_dict_nested_and_list():
 @pytest.mark.django_db
 def test_table_engine_non_string_column_does_not_crash():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Legacy column entry",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    cfg = ExportConfigTable.objects.create(
+    cfg = attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
     )
     # Bypass model validation (simulates legacy / raw DB data).
-    ExportConfigTable.objects.filter(pk=cfg.pk).update(columns=[{"data": "title"}])
+    CategoryConfig.objects.filter(pk=cfg.pk).update(columns=[{"data": "title"}])
     definition.refresh_from_db()
     engine = ExportTableEngine(definition)
     assert len(engine.get_headers()) == 1
@@ -231,7 +235,8 @@ def test_table_engine_non_string_column_does_not_crash():
 @pytest.mark.django_db
 def test_table_engine_without_config_table():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Bare",
         target=ct,
         manager="objects",
@@ -246,24 +251,27 @@ def test_table_engine_without_config_table():
 def test_pdf_engine():
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="X", pages=1)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Books PDF",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
     )
-    ExportConfigPdf.objects.create(
+    attach_pdf_export(
         export=definition,
         template="<html>{{ object_list }}</html>",
         configuration={"orientation": "landscape"},
     )
     pdf = ExportPdfEngine(definition)
-    assert pdf.definition.config_pdf.configuration["orientation"] == "landscape"
+    from django_importexport_flow.engine.core.formats import get_export_config
+
+    assert get_export_config(pdf.definition, "pdf").configuration["orientation"] == "landscape"
     assert "<html>" in pdf.get_template()
     table = ExportTableEngine(definition)
     assert table.get_headers() == [str(Book._meta.get_field("title").verbose_name)]
@@ -275,7 +283,8 @@ def test_core_engine_manager_kwargs_config_scopes_queryset():
     ct = ContentType.objects.get_for_model(Book)
     Book.objects.create(title="Small", pages=5)
     big = Book.objects.create(title="Big", pages=20)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Scoped by manager kwargs",
         target=ct,
         manager="objects.all",
@@ -291,10 +300,10 @@ def test_core_engine_manager_kwargs_config_scopes_queryset():
 @pytest.mark.django_db
 def test_core_engine_validates_filter_config_on_queryset_without_save():
     """Unsaved import definitions still get strict ORM-key validation like model.clean()."""
-    from django_importexport_flow.models import ImportDefinition
+    from django_importexport_flow.models import Definition
 
     ct = ContentType.objects.get_for_model(Book)
-    definition = ImportDefinition(
+    definition = Definition(
         name="Draft",
         target=ct,
         filter_config={"not_a_real_field": 1},

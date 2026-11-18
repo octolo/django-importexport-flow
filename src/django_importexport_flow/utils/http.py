@@ -29,9 +29,9 @@ def configuration_json_download_response(instance: Any, payload: dict[str, Any])
     """JSON body with ``Content-Disposition: attachment`` for configuration export admin views."""
     from .helpers import configuration_json_download_filename
 
-    body = (
-        json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-    ).encode("utf-8")
+    body = (json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode(
+        "utf-8"
+    )
     response = HttpResponse(body, content_type="application/json; charset=utf-8")
     response["Content-Disposition"] = content_disposition_attachment(
         configuration_json_download_filename(instance)

@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from django import forms
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from .engine.core.filters import (
@@ -20,12 +21,29 @@ from .utils.upload_validation import validate_configuration_json_payload
 MAX_IMPORT_BYTES = get_setting("MAX_IMPORT_BYTES")
 MAX_TABULAR_IMPORT_BYTES = get_setting("MAX_TABULAR_IMPORT_BYTES")
 
-# CSV / Excel / JSON — shared by export, example download, and tabular import hints.
+# Spreadsheet and structured formats used by the import example file (not documents).
 EXPORT_FORMAT_CHOICES = (
     ("csv", "CSV"),
     ("excel", _("Excel (.xlsx)")),
     ("json", "JSON"),
 )
+
+
+def _definition_enables_pdf(definition: Any) -> bool:
+    from .engine.core.formats import get_export_config
+
+    try:
+        get_export_config(definition, "pdf")
+    except ValueError:
+        return False
+    return True
+
+
+def export_format_choices(definition: Any):
+    """Enabled formats grouped by category, limited to configs present on ``definition``."""
+    from .engine.core.formats import grouped_format_choices
+
+    return grouped_format_choices(definition)
 
 
 class ExportGenerateForm(forms.Form):
@@ -37,9 +55,26 @@ class ExportGenerateForm(forms.Form):
     ``filter_config`` is not editable here (uses the report only).
     """
 
+    allow_template_override = False
+
     export_format = forms.ChoiceField(
         label=_("Format"),
         choices=EXPORT_FORMAT_CHOICES,
+    )
+    template_override = forms.CharField(
+        label=_("Template override"),
+        required=False,
+        widget=forms.Textarea,
+        help_text=_("PDF only. Leave empty to use the template stored on the format."),
+    )
+    configuration_overrides = forms.JSONField(
+        label=_("Configuration overrides"),
+        required=False,
+        initial={},
+        help_text=_(
+            'Optional object {"format": {...}, "hook": {...}}. '
+            "Native format options go in format; hook values are passed to the hooks."
+        ),
     )
 
     def __init__(self, *args, **kwargs) -> None:
@@ -49,23 +84,74 @@ class ExportGenerateForm(forms.Form):
         if definition is None:
             return
         attach_filter_context_fields(self, definition, for_import=False)
-        reorder_filter_fields_first(self, (), ("export_format",))
+        export_format = self.fields["export_format"]
+        if isinstance(export_format, forms.ChoiceField):
+            export_format.choices = export_format_choices(definition)
+        self.allow_template_override = bool(
+            getattr(self.__class__, "_allow_template_override", False)
+        )
+        if not self.allow_template_override or not _definition_enables_pdf(definition):
+            self.fields.pop("template_override", None)
+        reorder_filter_fields_first(
+            self,
+            (),
+            ("export_format", "template_override", "configuration_overrides"),
+        )
 
     def clean(self) -> dict[str, Any]:
+        from .engine.core.overrides import (
+            normalize_configuration_overrides,
+            validate_template_override,
+        )
+
         cleaned = super().clean()
+        if not isinstance(cleaned, dict):
+            return {}
         definition = getattr(self.__class__, "_filter_context_source", None)
-        if definition is None:
+        if definition is None or self.errors:
             return cleaned
         clean_filter_context_data(self, cleaned, definition)
+        export_format = str(cleaned.get("export_format") or "")
+        try:
+            cleaned["configuration_overrides"] = normalize_configuration_overrides(
+                cleaned.get("configuration_overrides"),
+                export_format=export_format,
+            )
+        except ValidationError as exc:
+            self.add_error("configuration_overrides", exc)
+        if "template_override" in self.fields:
+            try:
+                cleaned["template_override"] = validate_template_override(
+                    cleaned.get("template_override") or "",
+                    export_format=export_format,
+                )
+            except ValidationError as exc:
+                self.add_error("template_override", exc)
+        elif not self.allow_template_override and self._posted_template_override():
+            self.add_error(
+                "export_format",
+                _("You do not have permission to override the PDF template."),
+            )
+        elif str(cleaned.get("template_override") or "").strip():
+            self.add_error("export_format", _("A template override is only valid for PDF exports."))
         return cleaned
 
+    def _posted_template_override(self) -> str:
+        data = getattr(self, "data", None)
+        if not data:
+            return ""
+        return str(data.get("template_override") or "").strip()
 
-def make_export_form_class(definition: Any):
+
+def make_export_form_class(definition: Any, *, allow_template_override: bool = False):
     """Bind a report instance to :class:`ExportGenerateForm` (required by admin POST)."""
     return type(
         f"ReportExportForm_{id(definition)}",
         (ExportGenerateForm,),
-        {"_filter_context_source": definition},
+        {
+            "_filter_context_source": definition,
+            "_allow_template_override": allow_template_override,
+        },
     )
 
 
@@ -127,6 +213,8 @@ class TabularImportForm(forms.Form):
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
+        if not isinstance(cleaned, dict):
+            return {}
         source = getattr(self.__class__, "_filter_context_source", None)
         step = cleaned.get("step") or self.STEP_UPLOAD
 

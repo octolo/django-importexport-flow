@@ -1,0 +1,97 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "2e483cb2-8186-4dc0-8ec0-0fd0f7ce13f5",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.421Z",
+        "updated_at": "2026-11-17T13:51:20.421Z",
+        "direction": "export",
+        "name": "Sample fixture — Bookmarks (generic fk)",
+        "named_id": "sample-fixture-bookmarks-generic-fk",
+        "description": "GenericForeignKey stored as content type plus object id.",
+        "target": [
+          "sample",
+          "genericbookmark"
+        ],
+        "manager": "objects",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 23,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "label",
+          "object_id",
+          "content_type.model"
+        ],
+        "definition": "2e483cb2-8186-4dc0-8ec0-0fd0f7ce13f5",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 33,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 23,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 34,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 23,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 24,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "label",
+          "object_id",
+          "content_type.model"
+        ],
+        "definition": "2e483cb2-8186-4dc0-8ec0-0fd0f7ce13f5",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 35,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 24,
+        "format_key": "json",
+        "template": ""
+      }
+    }
+  ]
+}

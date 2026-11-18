@@ -1,6 +1,6 @@
 # django-importexport-flow — documentation
 
-Declarative exports and imports: **target model** (`ContentType`), **manager**, **filters** (`filter_config`, optional `filter_request`, optional `filter_mandatory`), **`order_by`**, and **columns** on **`ExportConfigTable`**. Optional **PDF** via **`ExportConfigPdf`**.
+Declarative exports and imports. A **`Definition`** stores the direction, target model, filters, and ordering. Each **`CategoryConfig`** stores the columns shared by one category, and each **`FormatConfig`** activates CSV, Excel, JSON, or PDF. **`ExportRequest`** and **`ImportRequest`** keep the audit rows.
 
 ## Contents
 
@@ -12,6 +12,7 @@ Declarative exports and imports: **target model** (`ContentType`), **manager**, 
 | [Filters and export](filters-and-export.md) | `filter_request` / `filter_mandatory`, admin form fields, engine |
 | [Import data (wizard)](import-data.md) | **`ImportDefinition`** wizard, **`ImportRequest`** audit, relaunch |
 | [Development](development.md) | Local setup, tests, tooling |
+| [Current-state audit](current-state-audit.md) | Measured architecture, quality, security, and remaining debt |
 | [AI](AI.md) | Short notes for assistants working in this repo |
 
 ## API summary
@@ -31,6 +32,7 @@ pip install django-importexport-flow
 
 ```python
 INSTALLED_APPS = [
+    "django.contrib.admin",
     "django.contrib.contenttypes",
     "django_boosted",
     "django_importexport_flow",

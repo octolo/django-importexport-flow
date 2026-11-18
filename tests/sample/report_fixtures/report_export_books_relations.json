@@ -1,0 +1,109 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "e3afdc3b-471a-4085-aded-bc7bf6798c65",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.396Z",
+        "updated_at": "2026-11-17T13:51:20.396Z",
+        "direction": "export",
+        "name": "Sample fixture — Books (relations and json)",
+        "named_id": "sample-fixture-books-relations-and-json",
+        "description": "FK, reverse O2O, M2M slots, JSON subpaths, a property, and a callable column.",
+        "target": [
+          "sample",
+          "book"
+        ],
+        "manager": "objects",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 12,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title",
+          "author.name",
+          "author.name_upper",
+          "author.get_display_name",
+          "author.profile.bio",
+          "tags.0.name",
+          "tags.1.name",
+          "metadata.lang",
+          "metadata.tags.0"
+        ],
+        "definition": "e3afdc3b-471a-4085-aded-bc7bf6798c65",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 17,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 12,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 18,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 12,
+        "format_key": "excel",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 13,
+      "fields": {
+        "configuration": {},
+        "columns": [
+          "title",
+          "author.name",
+          "author.name_upper",
+          "author.get_display_name",
+          "author.profile.bio",
+          "tags.0.name",
+          "tags.1.name",
+          "metadata.lang",
+          "metadata.tags.0"
+        ],
+        "definition": "e3afdc3b-471a-4085-aded-bc7bf6798c65",
+        "category_key": "structured_data"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 19,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 13,
+        "format_key": "json",
+        "template": ""
+      }
+    }
+  ]
+}

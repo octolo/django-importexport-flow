@@ -1,0 +1,225 @@
+[
+  {
+    "model": "sample.category",
+    "pk": 1,
+    "fields": {"name": "Science"}
+  },
+  {
+    "model": "sample.category",
+    "pk": 2,
+    "fields": {"name": "Fiction"}
+  },
+  {
+    "model": "sample.author",
+    "pk": 1,
+    "fields": {"name": "Ada Lovelace"}
+  },
+  {
+    "model": "sample.author",
+    "pk": 2,
+    "fields": {"name": "Marie Curie"}
+  },
+  {
+    "model": "sample.authorprofile",
+    "pk": 1,
+    "fields": {"author": 1, "bio": "First programmer"}
+  },
+  {
+    "model": "sample.tag",
+    "pk": 1,
+    "fields": {"name": "physics", "importance": 2, "category": 1}
+  },
+  {
+    "model": "sample.tag",
+    "pk": 2,
+    "fields": {"name": "novel", "importance": 1, "category": 2}
+  },
+  {
+    "model": "sample.book",
+    "pk": 1,
+    "fields": {
+      "title": "The Habit of Excellence",
+      "pages": 320,
+      "price": "29.99",
+      "metadata": {"lang": "en", "extra": {"depth": 1}, "tags": ["alpha"]},
+      "publication_date": "2020-03-01",
+      "recorded_at": "2020-03-01T09:30:00Z",
+      "author": 1,
+      "tags": [1, 2]
+    }
+  },
+  {
+    "model": "sample.book",
+    "pk": 2,
+    "fields": {
+      "title": "Notes de cours",
+      "pages": 120,
+      "price": "12.00",
+      "metadata": {"lang": "fr"},
+      "publication_date": "2021-06-15",
+      "recorded_at": "2021-06-15T14:00:00Z",
+      "author": 2,
+      "tags": []
+    }
+  },
+  {
+    "model": "sample.book",
+    "pk": 3,
+    "fields": {
+      "title": "Orphan",
+      "pages": 10,
+      "price": "0.00",
+      "metadata": {},
+      "publication_date": "2022-01-01",
+      "recorded_at": "2022-01-01T00:00:00Z",
+      "author": null,
+      "tags": []
+    }
+  },
+  {
+    "model": "sample.fieldshowcase",
+    "pk": 1,
+    "fields": {
+      "char_f": "hello",
+      "text_f": "a longer note",
+      "slug_f": "hello-slug",
+      "email_f": "ada@example.com",
+      "url_f": "https://example.com",
+      "int_f": -3,
+      "bigint_f": 9007199254740991,
+      "smallint_f": 12,
+      "posint_f": 4,
+      "possmall_f": 2,
+      "posbigint_f": 8,
+      "float_f": 1.5,
+      "decimal_f": "10.25",
+      "bool_f": true,
+      "bool_null_f": null,
+      "date_f": "2024-01-02",
+      "datetime_f": "2024-01-02T03:04:05Z",
+      "time_f": "03:04:05",
+      "duration_f": "1 02:00:00",
+      "uuid_f": "12345678-1234-5678-1234-567812345678",
+      "binary_f": null,
+      "json_f": {"ok": true},
+      "ip_f": "127.0.0.1",
+      "file_f": "",
+      "fk_author": 1,
+      "tags_m2m": [1]
+    }
+  },
+  {
+    "model": "sample.fieldshowcasedetail",
+    "pk": 1,
+    "fields": {"showcase": 1, "note": "detail note"}
+  },
+  {
+    "model": "sample.genericbookmark",
+    "pk": 1,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "object_id": 1,
+      "label": "Loved book"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 1,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "title",
+      "language": "fr",
+      "label": "Titre"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 2,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "title",
+      "language": "en",
+      "label": "Title"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 3,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "pages",
+      "language": "fr",
+      "label": "Pages"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 4,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "price",
+      "language": "fr",
+      "label": "Prix"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 5,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "metadata",
+      "language": "fr",
+      "label": "Métadonnées"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 6,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "metadata.lang",
+      "language": "fr",
+      "label": "Langue"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 7,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "tags.name",
+      "language": "fr",
+      "label": "Étiquette"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 8,
+    "fields": {
+      "content_type": ["sample", "book"],
+      "path": "title_len",
+      "language": "fr",
+      "label": "Longueur du titre"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 9,
+    "fields": {
+      "content_type": ["sample", "author"],
+      "path": "name",
+      "language": "fr",
+      "label": "Nom"
+    }
+  },
+  {
+    "model": "django_importexport_flow.columntranslation",
+    "pk": 10,
+    "fields": {
+      "content_type": ["sample", "authorprofile"],
+      "path": "bio",
+      "language": "fr",
+      "label": "Biographie"
+    }
+  }
+]

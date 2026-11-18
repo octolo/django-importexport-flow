@@ -1,0 +1,68 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "9c82fe0b-030f-4063-8f77-56588c52b8d2",
+      "fields": {
+        "created_by": null,
+        "updated_by": null,
+        "created_at": "2026-11-17T13:51:20.447Z",
+        "updated_at": "2026-11-17T13:51:20.447Z",
+        "direction": "import",
+        "name": "Sample fixture — Import author profiles",
+        "named_id": "sample-fixture-import-author-profiles",
+        "description": "Forward one-to-one: profile row plus author.name.",
+        "target": [
+          "sample",
+          "authorprofile"
+        ],
+        "manager": "objects.all",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 27,
+      "fields": {
+        "configuration": {},
+        "columns": [],
+        "definition": "9c82fe0b-030f-4063-8f77-56588c52b8d2",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 40,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 27,
+        "format_key": "csv",
+        "template": ""
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 41,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 27,
+        "format_key": "excel",
+        "template": ""
+      }
+    }
+  ]
+}

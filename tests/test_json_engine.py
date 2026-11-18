@@ -4,20 +4,22 @@ import pytest
 from django.contrib.contenttypes.models import ContentType
 
 from django_importexport_flow.engine import ExportTableEngine, TableEngine
-from django_importexport_flow.models import ExportConfigTable, ExportDefinition
+from django_importexport_flow.models import Definition
 from tests.sample.models import Book
+from tests.support import attach_tabular_export
 
 
 @pytest.mark.django_db
 def test_table_engine_json_and_pandas_exports():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="JSON books",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "pages"],
         configuration={"json": {"indent": 2}},
@@ -38,13 +40,14 @@ def test_table_engine_json_and_pandas_exports():
 @pytest.mark.django_db
 def test_table_engine_alias():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="Alias",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title"],
         configuration={},
@@ -58,13 +61,14 @@ def test_table_engine_alias():
 @pytest.mark.django_db
 def test_table_engine_csv_pandas_uses_configuration_delimiter():
     ct = ContentType.objects.get_for_model(Book)
-    definition = ExportDefinition.objects.create(
+    definition = Definition.objects.create(
+        direction="export",
         name="CSV",
         target=ct,
         manager="objects",
         filter_config={},
     )
-    ExportConfigTable.objects.create(
+    attach_tabular_export(
         export=definition,
         columns=["title", "pages"],
         configuration={"csv": {"delimiter": ";"}},

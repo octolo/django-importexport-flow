@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -11,11 +12,16 @@ from django.db.models import JSONField, ManyToManyField
 
 __all__ = [
     "M2M_SLOT_PATH_PATTERN",
+    "column_label_override_from_configuration",
+    "configuration_json_download_filename",
     "dataframe_preview_table",
+    "dated_export_filename",
+    "export_timestamp_for_filename",
     "get_expanded_related_value",
-    "get_field_or_accessor",
     "get_export_definitions",
+    "get_field_or_accessor",
     "get_related_model_for_accessor",
+    "get_setting",
     "get_value_from_path",
     "label_for_m2m_slot_path",
     "label_for_slot_path",
@@ -23,15 +29,10 @@ __all__ = [
     "max_relation_counts",
     "normalize_table_column",
     "parse_reverse_expand_spec",
+    "resolve_column_header",
     "resolve_expand_relation",
-    "column_label_override_from_configuration",
-    "resolve_table_column_label",
-    "verbose_name_for_field_path",
-    "get_setting",
     "safe_download_stem",
-    "export_timestamp_for_filename",
-    "dated_export_filename",
-    "configuration_json_download_filename",
+    "verbose_name_for_field_path",
 ]
 
 # ``book_set.*[title:pages]`` — reverse manager, repeated columns per related row
@@ -64,10 +65,8 @@ def _get_path_segment(current: Any, part: str) -> Any:
         return None
     value = getattr(current, part, None)
     if callable(value) and not hasattr(value, "all"):
-        try:
+        with contextlib.suppress(TypeError):
             value = value()
-        except TypeError:
-            pass
     return value
 
 
@@ -144,10 +143,16 @@ def label_for_slot_path(model: type[models.Model], path: str) -> str | None:
         rm = field.related_model
     else:
         return None
-    vn = verbose_name_for_field_path(rm, sub)
-    if vn is None:
+    from .translations import _translation
+
+    base = _translation(model, f"{rel_name}.{sub}")
+    if not base and rm is not None:
+        base = _translation(rm, sub)
+    if not base:
+        base = verbose_name_for_field_path(rm, sub)
+    if base is None or not str(base).strip():
         return None
-    return f"{vn} {int(slot_s) + 1}"
+    return f"{str(base).strip()} {int(slot_s) + 1}"
 
 
 def label_for_m2m_slot_path(model: type[models.Model], path: str) -> str | None:
@@ -175,7 +180,7 @@ def verbose_name_for_field_path(model: type[models.Model], path: str) -> str | N
         if i >= len(parts):
             break
         if isinstance(last_field, JSONField):
-            return f"{str(last_field.verbose_name)} ({'.'.join(parts[i:])})"
+            return f"{last_field.verbose_name!s} ({'.'.join(parts[i:])})"
         if isinstance(last_field, ManyToManyField):
             return None
         nxt = _next_model_for_rel_field(last_field)
@@ -205,8 +210,8 @@ def column_label_override_from_configuration(
     field_key: str,
 ) -> str | None:
     """
-    Human label from :class:`~django_importexport_flow.models.ExportConfigTable`
-    ``configuration``: entry ``f\"{field_key}_label\"`` (non-empty string), e.g.
+    Human label from a category ``configuration``: entry ``f\"{field_key}_label\"``
+    (non-empty string), e.g.
     ``my_ann_field_label`` for column path ``my_ann_field``.
     """
     if not isinstance(configuration, dict) or not field_key:
@@ -218,27 +223,21 @@ def column_label_override_from_configuration(
     return s if s else None
 
 
-def resolve_table_column_label(
+def resolve_column_header(
     model: type[models.Model],
     data_path: str,
     *,
     configuration: dict[str, Any] | None = None,
+    language: str | None = None,
 ) -> str:
-    """
-    Verbose name from model meta when possible; if missing or blank,
-    ``configuration[``f\"{data_path}_label\"``]`` when ``configuration`` is the
-    export table config dict; else ``data_path``.
-    """
-    slot = label_for_slot_path(model, data_path)
-    if slot is not None:
-        return slot
-    vn = verbose_name_for_field_path(model, data_path)
-    if vn is not None and str(vn).strip():
-        return str(vn).strip()
-    override = column_label_override_from_configuration(configuration, data_path)
-    if override is not None:
-        return override
-    return data_path
+    from .translations import resolve_column_header as _resolve
+
+    return _resolve(
+        model,
+        data_path,
+        configuration=configuration,
+        language=language,
+    )
 
 
 def parse_reverse_expand_spec(path: str) -> tuple[str, list[str]] | None:
@@ -303,7 +302,12 @@ def _orm_count_lookup_for_reverse_accessor(model: type[models.Model], accessor: 
     the related model's ``model_name``).
     """
     for f in model._meta.get_fields():
-        if getattr(f, "one_to_many", False) and f.get_accessor_name() == accessor:
+        accessor_name = getattr(f, "get_accessor_name", None)
+        if (
+            getattr(f, "one_to_many", False)
+            and callable(accessor_name)
+            and accessor_name() == accessor
+        ):
             return f.name
     return accessor
 
@@ -368,9 +372,28 @@ def get_expanded_related_value(
 
 
 def get_export_definitions(model_class: type[models.Model]) -> models.QuerySet:
-    from django_importexport_flow.models import ExportDefinition
+    from django_importexport_flow.models import Definition
 
-    return ExportDefinition.objects.for_model(model_class)
+    return Definition.objects.for_model(model_class).exports()
+
+
+def preview_scalar(value: Any) -> Any:
+    """Normalize one dataframe cell for a JSON-friendly preview."""
+    import pandas as pd
+
+    if pd.isna(value):
+        return ""
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    try:
+        import numpy as np
+
+        if isinstance(value, np.generic):
+            return value.item()
+    except ImportError:
+        pass
+    return value
 
 
 def dataframe_preview_table(df: Any, *, limit: int = 30) -> tuple[list[str], list[list[Any]]]:
@@ -391,28 +414,10 @@ def dataframe_preview_table(df: Any, *, limit: int = 30) -> tuple[list[str], lis
             f"dataframe_preview_table expects pandas.DataFrame, got {type(df).__name__!r}."
         )
 
-    def _preview_scalar(v: Any) -> Any:
-        if pd.isna(v):
-            return ""
-        iso = getattr(v, "isoformat", None)
-        if callable(iso):
-            return iso()
-        try:
-            import numpy as np
-
-            if isinstance(v, np.generic):
-                return v.item()
-        except ImportError:
-            pass
-        return v
-
     cols = [str(c) for c in df.columns]
     rows_out: list[list[Any]] = []
     for _, row in df.head(limit).iterrows():
-        r: list[Any] = []
-        for c in df.columns:
-            r.append(_preview_scalar(row[c]))
-        rows_out.append(r)
+        rows_out.append([preview_scalar(row[c]) for c in df.columns])
     return cols, rows_out
 
 
@@ -476,7 +481,7 @@ def get_setting(name: str, default: Any | None = None) -> Any:
     pkg_defaults = DjangoImportExportFlowConfig.default_settings
     if name not in pkg_defaults and default is None:
         raise KeyError(f"Unknown django-importexport-flow setting: {name!r}")
-    fallback = pkg_defaults[name] if name in pkg_defaults else default
+    fallback = pkg_defaults.get(name, default)
     if not settings.configured:
         return fallback
     flow = getattr(settings, "DJANGO_IMPORTEXPORT_FLOW", None)
