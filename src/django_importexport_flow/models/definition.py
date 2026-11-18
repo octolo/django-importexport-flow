@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import ClassVar
 
+from django import VERSION as DJANGO_VERSION
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -23,6 +24,15 @@ from ..managers import DefinitionManager, ExportDefinitionManager, ImportDefinit
 
 def _filled(value: object) -> bool:
     return isinstance(value, (dict, list)) and bool(value)
+
+
+def _direction_valid_constraint() -> models.CheckConstraint:
+    """Django 5.0 only accepts ``check=``; 5.1+ prefer ``condition=``."""
+    expression = Q(direction__in=["export", "import"])
+    name = "definition_direction_valid"
+    if DJANGO_VERSION >= (5, 1):
+        return models.CheckConstraint(condition=expression, name=name)
+    return models.CheckConstraint(check=expression, name=name)  # type: ignore[call-arg]
 
 
 class Definition(AuditMixin, models.Model):
@@ -159,10 +169,7 @@ class Definition(AuditMixin, models.Model):
         verbose_name = _("Definition")
         verbose_name_plural = _("Definitions")
         constraints = (
-            models.CheckConstraint(
-                check=Q(direction__in=["export", "import"]),
-                name="definition_direction_valid",
-            ),
+            _direction_valid_constraint(),
             models.UniqueConstraint(
                 fields=["direction", "named_id"],
                 name="definition_direction_named_id_uniq",

@@ -129,18 +129,13 @@ used by Celery or django-rq.
 ## Reference commands
 
 ```bash
-python manage.py check
-ruff check src tests
-ruff format --check src tests
-pytest --cov=django_importexport_flow --cov-branch --cov-report=term-missing
-bandit -r src/django_importexport_flow -x src/django_importexport_flow/migrations -ll -ii
-pip-audit .
-vulture src/django_importexport_flow --min-confidence 90 --exclude '*/migrations/*'
-xenon src/django_importexport_flow --exclude '*/migrations/*' --max-absolute C --max-modules B --max-average A
-mypy src/django_importexport_flow
-python -m build
-python -m twine check dist/*
+./audit.sh
+./audit.sh > audit-report.txt 2>&1
 ```
+
+The script runs Django check, Ruff, pytest with coverage and strict warnings,
+Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, and Twine. Redirect the
+output yourself if you want a file. `makemigrations` is not part of that script.
 
 Development command details are in [Development](development.md).
 

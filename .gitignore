@@ -76,6 +76,7 @@ db.sqlite3.old-*
 # Project specific
 *.bak
 *.tmp
+audit-report.txt
 
 # Local import uploads (MEDIA during dev)
 report_import_asks/

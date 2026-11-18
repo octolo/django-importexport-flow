@@ -32,6 +32,16 @@ xenon src/django_importexport_flow --exclude '*/migrations/*' --max-absolute C -
 mypy src/django_importexport_flow
 ```
 
+To run a full local audit (check, Ruff, pytest with coverage and strict
+warnings, Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, Twine):
+
+```bash
+./audit.sh
+./audit.sh > audit-report.txt 2>&1
+```
+
+`makemigrations` is not part of the audit script.
+
 The coverage gate is **72%** branch-aware coverage (`fail_under` in `pyproject.toml`). The measured result on 18 November 2026 is **77.24%** across **231** tests. The same run stays clean when resource warnings, unraisable exceptions, and unordered pagination warnings are treated as errors. Mypy covers the whole package, migrations excluded. See [current-state audit](current-state-audit.md).
 
 ## Package layout
