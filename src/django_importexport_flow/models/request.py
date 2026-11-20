@@ -238,10 +238,8 @@ class ExportRequest(AuditMixin, models.Model):
     manager_kwargs_payload = models.JSONField(
         default=dict,
         blank=True,
-        verbose_name=_("Manager kwargs form payload"),
-        help_text=_(
-            "mg_get_* / mg_kw_* from the export form (manager_kwargs_* on the definition)."
-        ),
+        verbose_name=_("Manager request payload"),
+        help_text=_("mg_* manager filters and mm_* manager method arguments from the export form."),
     )
     template_override = models.TextField(
         blank=True,

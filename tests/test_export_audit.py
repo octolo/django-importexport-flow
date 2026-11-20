@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date
+import json
+
 import pytest
 from django.contrib.contenttypes.models import ContentType
 from django.test import override_settings
@@ -10,6 +13,38 @@ from django_importexport_flow.models import Definition, ExportRequest
 from django_importexport_flow.utils.process import run_export_with_audit
 from tests.sample.models import Book
 from tests.support import attach_tabular_export
+
+
+@pytest.mark.django_db
+def test_run_export_with_audit_persists_manager_method_arguments(auditor_user):
+    ct = ContentType.objects.get_for_model(Book)
+    definition = Definition.objects.create(
+        direction="export",
+        name="Audit manager method args",
+        target=ct,
+        manager="objects.published_on_or_before",
+        manager_method_kwargs_request={
+            "published_before": {"kwarg": "cutoff", "type": "date"},
+        },
+    )
+    attach_tabular_export(export=definition, columns=["title"], configuration={})
+    Book.objects.create(title="Before", publication_date=date(2020, 1, 1))
+    Book.objects.create(title="After", publication_date=date(2022, 1, 1))
+
+    content, _content_type, _extension = run_export_with_audit(
+        export_definition=definition,
+        filter_payload={
+            "export_format": "json",
+            "mm_get_published_before": "2021-01-01",
+        },
+        user=auditor_user,
+    )
+
+    request = ExportRequest.objects.get(export_definition=definition)
+    assert request.manager_kwargs_payload == {
+        "mm_get_published_before": "2021-01-01",
+    }
+    assert len(json.loads(content.decode("utf-8"))) == 1
 
 
 @pytest.mark.django_db

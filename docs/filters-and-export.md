@@ -7,6 +7,7 @@
 | **`filter_config`** | Static `QuerySet.filter(**kwargs)` values (JSON object). |
 | **`filter_request`** | Optional GET query parameters: JSON map `{query_param_name: orm_lookup}`. If a value is absent or empty at runtime, that filter is skipped. |
 | **`filter_mandatory`** | Required dynamic filters: JSON object with optional keys **`get`** and **`kwargs`**. |
+| **`manager_method_kwargs_request`** | Optional GET query parameters mapped to arguments of the final callable in the export's `manager` path. |
 
 ### `filter_mandatory`
 
@@ -35,6 +36,30 @@ The export form builds one field per GET param and per URL kwarg:
 | `filter_mandatory.kwargs` | `fr_kw_<url_kwarg_name>` | Always |
 
 `filter_config` is not editable on this form; it always comes from the stored definition.
+
+### Manager method request arguments
+
+`manager_method_kwargs_request` is export-only and distinct from
+`manager_kwargs_request`: the latter applies queryset filters after the manager
+resolves, while this field passes optional GET values as keyword arguments to
+the final callable in `manager`. For example:
+
+```json
+{
+  "manager": "objects.get_queryset_annotated",
+  "manager_method_kwargs_request": {
+    "at_date": {"kwarg": "at_date", "type": "date"},
+    "at_date_start": {"kwarg": "at_date_start", "type": "date"}
+  }
+}
+```
+
+Each value may be the target argument name (string type) or an object with
+`kwarg` and optional `type`. Supported types are `str`, `date`, `datetime`,
+`int`, `float`, `decimal`, and `bool`. The export form and
+`run_table_export` payload use `mm_get_<query_param>`. Mapped arguments must
+have defaults in the callable signature so exports without those query
+parameters retain the manager method defaults.
 
 The form can also send two request-scoped values, stored on **`ExportRequest`** and applied only to that export:
 

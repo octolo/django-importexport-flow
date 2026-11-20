@@ -29,7 +29,7 @@ def _build_er_filter_payload(er: Any) -> dict[str, Any]:
     produce identical payloads for the same request.
 
     The stored fields are guaranteed to be disjoint (fr_* in ``filter_payload``,
-    mg_* in ``manager_kwargs_payload``), so the merge is collision-free.
+    mg_* / mm_* in ``manager_kwargs_payload``), so the merge is collision-free.
     ``export_format`` falls back to ``er.export_format`` for requests created
     programmatically without it in ``filter_payload``.
     """

@@ -4,9 +4,12 @@ from django.http import HttpRequest
 
 from .validation import (
     annotation_aliases_for_definition,
+    coerce_manager_method_argument,
     coerce_request_filter_value,
+    normalize_manager_method_kwargs_request,
     resolve_manager_to_queryset,
     split_filter_mandatory,
+    validate_manager_method_kwargs_request,
     validate_export_filter_fields,
     validate_filter_kwargs_for_model,
 )
@@ -87,7 +90,24 @@ class CoreEngine:
             strict_orm_keys_for_filters=strict_filters,
         )
         manager_path = (getattr(self.definition, "manager", None) or "").strip() or "objects.all"
-        qs: Any = resolve_manager_to_queryset(model_cls, manager_path)
+        method_request = getattr(
+            self.definition,
+            "manager_method_kwargs_request",
+            None,
+        )
+        validate_manager_method_kwargs_request(
+            model_cls,
+            manager_path,
+            method_request,
+        )
+        method_kwargs = self._manager_method_kwargs_from_request(
+            normalize_manager_method_kwargs_request(method_request)
+        )
+        qs: Any = resolve_manager_to_queryset(
+            model_cls,
+            manager_path,
+            method_kwargs=method_kwargs,
+        )
         manager_static = getattr(self.definition, "manager_kwargs_config", None) or {}
         if not isinstance(manager_static, dict):
             manager_static = {}
@@ -106,6 +126,24 @@ class CoreEngine:
         if order_by:
             self._cached_queryset = self._cached_queryset.order_by(*order_by)
         return self._cached_queryset
+
+    def _manager_method_kwargs_from_request(
+        self,
+        request_map: dict[str, tuple[str, str]],
+    ) -> dict[str, Any]:
+        if not request_map:
+            return {}
+        out: dict[str, Any] = {}
+        for param_name, (method_kwarg, value_type) in request_map.items():
+            value = self.request.GET.get(param_name)
+            if value in (None, ""):
+                continue
+            out[method_kwarg] = coerce_manager_method_argument(
+                method_kwarg,
+                value,
+                value_type,
+            )
+        return out
 
     def _filter_request(self) -> dict[str, Any]:
         out: dict[str, Any] = {}

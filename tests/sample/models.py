@@ -65,6 +65,12 @@ class BookQuerySet(models.QuerySet):
         """Queryset annotation used by the sample annotation export fixture."""
         return self.annotate(title_len=models.functions.Length("title"))
 
+    def published_on_or_before(self, cutoff: date | None = None):
+        """Manager method accepting a request-driven date argument."""
+        if cutoff is None:
+            return self.all()
+        return self.filter(publication_date__lte=cutoff)
+
 
 class Book(models.Model):
     title = models.CharField(_("Book title"), max_length=100)

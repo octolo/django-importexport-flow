@@ -1,7 +1,9 @@
 import json
+from datetime import date
 
 import pytest
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 
 from django_importexport_flow.engine.core.export import (
     DefinitionFilterProxy,
@@ -9,6 +11,8 @@ from django_importexport_flow.engine.core.export import (
     run_table_export,
 )
 from django_importexport_flow.forms import export_format_choices, make_export_form_class
+from django_importexport_flow.models import Definition
+from tests.sample.models import Book
 from tests.support import attach_pdf_export, attach_tabular_export
 
 
@@ -21,10 +25,6 @@ def _format_keys(choices) -> list[str]:
         else:
             keys.append(item[0])
     return keys
-
-
-from django_importexport_flow.models import Definition
-from tests.sample.models import Book
 
 
 @pytest.mark.django_db
@@ -56,6 +56,53 @@ def test_export_form_filter_request_and_queryset():
     data = json.loads(raw.decode("utf-8"))
     assert len(data) == 1
     assert data[0][str(Book._meta.get_field("title").verbose_name)] == "X"
+
+
+@pytest.mark.django_db
+def test_export_passes_typed_request_value_to_manager_method():
+    ct = ContentType.objects.get_for_model(Book)
+    definition = Definition.objects.create(
+        direction="export",
+        name="Date-aware manager",
+        target=ct,
+        manager="objects.published_on_or_before",
+        manager_method_kwargs_request={
+            "published_before": {"kwarg": "cutoff", "type": "date"},
+        },
+    )
+    attach_tabular_export(export=definition, columns=["title"], configuration={})
+    Book.objects.create(
+        title="Before",
+        publication_date=date(2020, 1, 1),
+    )
+    Book.objects.create(
+        title="After",
+        publication_date=date(2022, 1, 1),
+    )
+
+    FormClass = make_export_form_class(definition)
+    form = FormClass(
+        {
+            "export_format": "json",
+            "mm_get_published_before": "2021-01-01",
+        }
+    )
+    assert form.is_valid(), form.errors
+    raw, _ct, _ext = run_table_export(definition, form.cleaned_data)
+    data = json.loads(raw.decode("utf-8"))
+
+    assert len(data) == 1
+    assert data[0][str(Book._meta.get_field("title").verbose_name)] == "Before"
+
+    invalid_form = FormClass(
+        {
+            "export_format": "json",
+            "mm_get_published_before": "not-a-date",
+        }
+    )
+    assert invalid_form.is_valid(), invalid_form.errors
+    with pytest.raises(ValidationError):
+        run_table_export(definition, invalid_form.cleaned_data)
 
 
 @pytest.mark.django_db

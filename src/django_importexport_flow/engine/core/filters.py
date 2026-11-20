@@ -11,13 +11,16 @@ from django import forms
 from django.utils.translation import gettext_lazy as _
 
 from .export import (
+    form_field_name_for_manager_method_query_param,
     form_field_name_for_manager_query_param,
     form_field_name_for_manager_url_kwarg,
     form_field_name_for_query_param,
     form_field_name_for_url_kwarg,
 )
 from .validation import (
+    normalize_manager_method_kwargs_request,
     parse_filter_maps_from_definition,
+    parse_manager_method_kwargs_request_from_definition,
     parse_manager_kwargs_maps_from_definition,
 )
 
@@ -30,12 +33,15 @@ def attach_filter_context_fields(
 ) -> None:
     """
     Add ``fr_get_*`` / ``fr_kw_*`` CharFields to ``form`` from a definition-like ``source``
-    (``ExportDefinition`` or ``ImportDefinition`` with ``filter_request`` / ``filter_mandatory``).
+    plus ``mg_*`` and ``mm_get_*`` fields for export-only manager options.
     """
     req_label = _("Required for this import.") if for_import else _("Required for this export.")
     url_req = _("Required for this import.") if for_import else _("Required for this export.")
     fr, _mandatory, get_m, kw_map = parse_filter_maps_from_definition(source)
     mgr_fr, _m2, mgr_get_m, mgr_kw_map = parse_manager_kwargs_maps_from_definition(source)
+    manager_method_get = normalize_manager_method_kwargs_request(
+        parse_manager_method_kwargs_request_from_definition(source)
+    )
     all_get_params = set(fr) | set(get_m)
     for param_name in sorted(all_get_params):
         orm_field = get_m.get(param_name, fr.get(param_name))
@@ -77,6 +83,16 @@ def attach_filter_context_fields(
             required=False,
             help_text=url_req,
         )
+    for param_name, (method_kwarg, value_type) in sorted(manager_method_get.items()):
+        form.fields[form_field_name_for_manager_method_query_param(param_name)] = forms.CharField(
+            label=_("Manager method GET “%(param)s” → %(argument)s")
+            % {
+                "param": param_name,
+                "argument": f"{method_kwarg} ({value_type})",
+            },
+            required=False,
+            help_text=_("Optional — leave empty to use the manager method default."),
+        )
 
 
 def clean_filter_context_data(
@@ -87,6 +103,9 @@ def clean_filter_context_data(
     """Validate strip filter CharFields; mandatory GET and URL kwargs must be non-empty."""
     fr, _mandatory, get_m, kw_map = parse_filter_maps_from_definition(source)
     mgr_fr, _m2, mgr_get_m, mgr_kw_map = parse_manager_kwargs_maps_from_definition(source)
+    manager_method_get = normalize_manager_method_kwargs_request(
+        parse_manager_method_kwargs_request_from_definition(source)
+    )
     all_get_params = set(fr) | set(get_m)
     mgr_get_all = set(mgr_fr) | set(mgr_get_m)
 
@@ -126,19 +145,25 @@ def clean_filter_context_data(
             continue
         _clean_fr_field(fname, required=True)
 
+    for param_name in sorted(manager_method_get):
+        fname = form_field_name_for_manager_method_query_param(param_name)
+        if fname not in form.fields:
+            continue
+        _clean_fr_field(fname, required=False)
+
 
 def reorder_filter_fields_first(
     form: forms.Form,
     leading_field_names: tuple[str, ...],
     trailing_field_names: tuple[str, ...] = (),
 ) -> None:
-    """Place ``leading`` then ``mg_*`` then ``fr_*`` then ``trailing`` in field order."""
+    """Place ``leading`` then manager fields, filters, and ``trailing`` in field order."""
     reordered: dict[str, Any] = {}
     for name in leading_field_names:
         if name in form.fields:
             reordered[name] = form.fields[name]
     for name in sorted(form.fields):
-        if name.startswith("mg_"):
+        if name.startswith(("mm_", "mg_")):
             reordered[name] = form.fields[name]
     for name in sorted(form.fields):
         if name.startswith("fr_"):

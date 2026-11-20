@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from decimal import Decimal
+from inspect import Parameter, signature
 from functools import cached_property as functools_cached_property
 from typing import Any
 
 from django.core.exceptions import FieldDoesNotExist, ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.db.models import ManyToManyField
+from django.utils.dateparse import parse_date, parse_datetime
 from django.utils.translation import gettext_lazy as _
 
 from ...utils.helpers import get_field_or_accessor
@@ -165,20 +168,187 @@ def parse_manager_kwargs_maps_from_definition(
     )
 
 
+def parse_manager_method_kwargs_request_from_definition(definition: Any) -> dict[str, Any]:
+    """Return optional GET-to-method-argument mappings from an export definition."""
+    raw = getattr(definition, "manager_method_kwargs_request", None)
+    return raw if isinstance(raw, dict) else {}
+
+
+_MANAGER_METHOD_ARGUMENT_TYPES = {
+    "str",
+    "date",
+    "datetime",
+    "int",
+    "float",
+    "decimal",
+    "bool",
+}
+
+
+def normalize_manager_method_kwargs_request(request_map: Any) -> dict[str, tuple[str, str]]:
+    """Normalize query-param mappings to ``{param: (method_kwarg, value_type)}``."""
+    if request_map in (None, {}):
+        return {}
+    if not isinstance(request_map, dict):
+        raise ValidationError(_("manager_method_kwargs_request must be a JSON object."))
+
+    normalized: dict[str, tuple[str, str]] = {}
+    for query_param, raw_spec in request_map.items():
+        if not isinstance(query_param, str) or not query_param.strip():
+            raise ValidationError(
+                _("manager_method_kwargs_request keys must be non-empty query parameter names.")
+            )
+        if isinstance(raw_spec, str):
+            method_kwarg = raw_spec
+            value_type = "str"
+        elif isinstance(raw_spec, dict):
+            method_kwarg = raw_spec.get("kwarg")
+            value_type = raw_spec.get("type", "str")
+            if set(raw_spec) - {"kwarg", "type"}:
+                raise ValidationError(
+                    _("Manager method mapping for %(param)s has unsupported keys.")
+                    % {"param": query_param}
+                )
+        else:
+            raise ValidationError(
+                _("Manager method mapping for %(param)s must be a string or object.")
+                % {"param": query_param}
+            )
+        if not isinstance(method_kwarg, str) or not method_kwarg.strip():
+            raise ValidationError(
+                _("Manager method mapping for %(param)s needs a non-empty kwarg.")
+                % {"param": query_param}
+            )
+        if not isinstance(value_type, str):
+            raise ValidationError(
+                _("Manager method mapping for %(param)s has an invalid type.")
+                % {"param": query_param}
+            )
+        if value_type not in _MANAGER_METHOD_ARGUMENT_TYPES:
+            raise ValidationError(
+                _("Unsupported manager method argument type %(type)s.") % {"type": value_type}
+            )
+        normalized[query_param] = (method_kwarg, value_type)
+    return normalized
+
+
+def validate_manager_method_kwargs_request(
+    model: type[models.Model],
+    manager_path: str,
+    request_map: Any,
+) -> None:
+    """Validate optional GET parameters mapped to a manager method's keyword arguments."""
+    normalized = normalize_manager_method_kwargs_request(request_map)
+    if not normalized:
+        return
+
+    method = resolve_manager_method(model, manager_path)
+    try:
+        method_parameters = signature(method).parameters
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            _("Cannot inspect manager method %(path)s: %(error)s")
+            % {"path": manager_path, "error": str(exc)}
+        ) from exc
+    accepts_arbitrary_kwargs = any(
+        parameter.kind == Parameter.VAR_KEYWORD for parameter in method_parameters.values()
+    )
+    mapped_kwargs: set[str] = set()
+    for query_param, (method_kwarg, _value_type) in normalized.items():
+        if method_kwarg in mapped_kwargs:
+            raise ValidationError(
+                _("A manager method argument can only be mapped from one query parameter.")
+            )
+        mapped_kwargs.add(method_kwarg)
+        parameter = method_parameters.get(method_kwarg)
+        if parameter is None and not accepts_arbitrary_kwargs:
+            raise ValidationError(
+                _("Manager method %(path)s has no argument %(name)s.")
+                % {"path": manager_path, "name": method_kwarg}
+            )
+        if parameter is not None and parameter.kind in (
+            Parameter.POSITIONAL_ONLY,
+            Parameter.VAR_POSITIONAL,
+        ):
+            raise ValidationError(
+                _("Manager method argument %(name)s must accept a keyword value.")
+                % {"name": method_kwarg}
+            )
+        if parameter is not None and parameter.default is Parameter.empty:
+            raise ValidationError(
+                _(
+                    "Manager method argument %(name)s must have a default because "
+                    "request values are optional (%(param)s)."
+                )
+                % {"name": method_kwarg, "param": query_param}
+            )
+
+
+def coerce_manager_method_argument(argument_name: str, value: str, value_type: str) -> Any:
+    """Coerce a request string using its declared manager method argument type."""
+    if value_type == "str":
+        return value
+    if value_type == "date":
+        coerced = parse_date(value)
+    elif value_type == "datetime":
+        coerced = parse_datetime(value)
+    elif value_type == "int":
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValidationError(
+                _("Manager method argument %(name)s must be an integer.") % {"name": argument_name}
+            ) from exc
+    elif value_type == "float":
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ValidationError(
+                _("Manager method argument %(name)s must be a number.") % {"name": argument_name}
+            ) from exc
+    elif value_type == "decimal":
+        try:
+            return Decimal(value)
+        except (ValueError, ArithmeticError) as exc:
+            raise ValidationError(
+                _("Manager method argument %(name)s must be a decimal.") % {"name": argument_name}
+            ) from exc
+    elif value_type == "bool":
+        normalized = value.strip().lower()
+        if normalized in {"true", "1"}:
+            return True
+        if normalized in {"false", "0"}:
+            return False
+        raise ValidationError(
+            _("Manager method argument %(name)s must be true or false.") % {"name": argument_name}
+        )
+    else:
+        raise ValidationError(
+            _("Unsupported manager method argument type %(type)s.") % {"type": value_type}
+        )
+    if coerced is None:
+        raise ValidationError(
+            _("Invalid value for manager method argument %(name)s.") % {"name": argument_name}
+        )
+    return coerced
+
+
 def validate_export_filter_manager_disjoint(definition: Any) -> None:
     """
-    Query param and URL kwarg names must not overlap between ``filter_*`` and
-    ``manager_kwargs_*`` (distinct ``fr_get_*`` vs ``mg_get_*`` form keys).
+    Query param and URL kwarg names must not overlap between filter mappings and
+    manager mappings (distinct payload keys do not make duplicate GET names safe).
     """
     fr, _f_mand, fget, fkw = parse_filter_maps_from_definition(definition)
     mr, _m_mand, mget, mkw = parse_manager_kwargs_maps_from_definition(definition)
-    g_overlap = (set(fr) | set(fget)) & (set(mr) | set(mget))
+    method_get = set(parse_manager_method_kwargs_request_from_definition(definition))
+    g_overlap = (set(fr) | set(fget)) & (set(mr) | set(mget) | method_get)
+    g_overlap |= (set(mr) | set(mget)) & method_get
     kw_overlap = set(fkw) & set(mkw)
     if g_overlap or kw_overlap:
         names = sorted(g_overlap | kw_overlap)
         raise ValidationError(
             _(
-                "filter_request / filter_mandatory and manager_kwargs_* must use distinct "
+                "filter_* and manager request mappings must use distinct "
                 "query param and URL kwarg names (overlap: %(overlap)s)."
             )
             % {"overlap": ", ".join(names)}
@@ -530,13 +700,48 @@ def _require_loose_object(value: Any, message: Any, strict: bool) -> None:
     raise ValidationError(message)
 
 
-def resolve_manager_to_queryset(model: type[models.Model], manager_path: str) -> Any:
+def resolve_manager_method(model: type[models.Model], manager_path: str) -> Any:
+    """Resolve the callable at the end of a manager path without invoking it."""
+    parts = manager_path.split(".")
+    if len(parts) < 2:
+        raise ValidationError(
+            _("Manager path “%(path)s” does not identify a manager method.")
+            % {"path": manager_path}
+        )
+    method_owner: Any = model
+    for part in parts[:-1]:
+        method_owner = getattr(method_owner, part)
+        if callable(method_owner) and not isinstance(method_owner, models.Manager):
+            method_owner = method_owner()
+    method = getattr(method_owner, parts[-1])
+    if not callable(method) or isinstance(method, models.Manager):
+        raise ValidationError(
+            _("Manager path “%(path)s” does not end in a callable method.") % {"path": manager_path}
+        )
+    return method
+
+
+def resolve_manager_to_queryset(
+    model: type[models.Model],
+    manager_path: str,
+    *,
+    method_kwargs: dict[str, Any] | None = None,
+) -> Any:
     """Walk ``objects`` / ``objects.all``-style path; result must support ``.filter()``."""
     qs: Any = model
-    for part in manager_path.split("."):
+    parts = manager_path.split(".")
+    for index, part in enumerate(parts):
         qs = getattr(qs, part)
         if callable(qs) and not isinstance(qs, models.Manager):
-            qs = qs()
+            kwargs = (method_kwargs or {}) if index == len(parts) - 1 else {}
+            if kwargs:
+                try:
+                    signature(qs).bind_partial(**kwargs)
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError(
+                        _("Invalid manager method arguments: %(error)s") % {"error": str(exc)}
+                    ) from exc
+            qs = qs(**kwargs)
     if not hasattr(qs, "filter"):
         raise ValidationError(
             _("Manager path “%(path)s” must resolve to a manager or queryset (got %(got)s).")

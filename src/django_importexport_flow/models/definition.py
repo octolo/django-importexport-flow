@@ -18,6 +18,7 @@ from ..engine.core.validation import (
     validate_export_filter_fields,
     validate_export_filter_manager_disjoint,
     validate_import_match_fields,
+    validate_manager_method_kwargs_request,
 )
 from ..managers import DefinitionManager, ExportDefinitionManager, ImportDefinitionManager
 
@@ -100,6 +101,13 @@ class Definition(AuditMixin, models.Model):
         null=True,
         verbose_name=_("Manager mandatory filters"),
         help_text=_("Export only. Required manager filters (mg_get_* / mg_kw_*)."),
+    )
+    manager_method_kwargs_request = models.JSONField(
+        default=dict,
+        blank=True,
+        null=True,
+        verbose_name=_("Manager method request arguments"),
+        help_text=_("Export only. {query_param: method_argument} read from mm_get_<param>."),
     )
     order_by = models.JSONField(
         default=list,
@@ -204,14 +212,20 @@ class Definition(AuditMixin, models.Model):
                 "manager_kwargs_config",
                 "manager_kwargs_request",
                 "manager_kwargs_mandatory",
+                "manager_method_kwargs_request",
             )
         ):
             raise ValidationError(
-                _("Export manager filters cannot be set on an import definition.")
+                _("Export manager options cannot be set on an import definition.")
             )
 
     def _clean_export(self, model: type[models.Model]) -> None:
         validate_export_filter_manager_disjoint(self)
+        validate_manager_method_kwargs_request(
+            model,
+            self.manager,
+            self.manager_method_kwargs_request,
+        )
         validate_export_filter_fields(
             model,
             self.filter_config,
