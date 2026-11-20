@@ -198,6 +198,7 @@ def normalize_manager_method_kwargs_request(request_map: Any) -> dict[str, tuple
             raise ValidationError(
                 _("manager_method_kwargs_request keys must be non-empty query parameter names.")
             )
+        method_kwarg: object
         if isinstance(raw_spec, str):
             method_kwarg = raw_spec
             value_type = "str"
