@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from decimal import Decimal
-from inspect import Parameter, signature
 from functools import cached_property as functools_cached_property
+from inspect import Parameter, signature
 from typing import Any
 
 from django.core.exceptions import FieldDoesNotExist, ObjectDoesNotExist, ValidationError

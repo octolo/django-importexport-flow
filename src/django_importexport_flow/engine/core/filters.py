@@ -20,8 +20,8 @@ from .export import (
 from .validation import (
     normalize_manager_method_kwargs_request,
     parse_filter_maps_from_definition,
-    parse_manager_method_kwargs_request_from_definition,
     parse_manager_kwargs_maps_from_definition,
+    parse_manager_method_kwargs_request_from_definition,
 )
 
 

@@ -12,8 +12,8 @@ from .pdf import PdfEngine
 from .table import TableEngine
 from .validation import (
     parse_filter_maps_from_definition,
-    parse_manager_method_kwargs_request_from_definition,
     parse_manager_kwargs_maps_from_definition,
+    parse_manager_method_kwargs_request_from_definition,
 )
 
 
