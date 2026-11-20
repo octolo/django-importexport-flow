@@ -8,7 +8,34 @@ On an import **`Definition`** change page, **Import data** opens a wizard:
 
 Settings (defaults in **`DjangoImportExportFlowConfig.default_settings`**, overridable via **`DJANGO_IMPORTEXPORT_FLOW`**): **`IMPORT_TASK_BACKEND`** (`sync` \| `thread` \| `celery` \| `rq`), **`IMPORT_ADMIN_OFFER_ASYNC`**, **`IMPORT_ADMIN_ASYNC_DEFAULT`**, **`PERSIST_IMPORT_REQUEST_FILES`** and **`PERSIST_EXPORT_REQUEST_FILES`** (both default **true**; when **false**, a synchronous call keeps that file in memory and leaves the request file field empty). **`IMPORT_FILE_STORAGE`** and **`EXPORT_OUTPUT_STORAGE`** are dotted storage classes; empty uses Django's default storage. **`IMPORT_FILE_UPLOAD_TO`** and **`EXPORT_OUTPUT_UPLOAD_TO`** are either a relative path template (`report_import_asks/%Y/%m/`, `export_outputs/%Y/%m/`) or a dotted `callable(instance, filename)`. A template must contain `/` or `%`. API: **`process_import(..., run_async=True)`** returns **`queued=True`** when the row is deferred; CLI: **`process_import ... --async`**. The admin wizard, relaunch, and async workers require **`PERSIST_IMPORT_REQUEST_FILES`**.
 
-Implementation: **`django_importexport_flow.task.get_import_task_backend`**, **`dispatch_import_request`**; workers call **`django_importexport_flow.tasks.execute_import_request_by_uuid`** (Celery task name **`django_importexport_flow.run_import_request`**). Those backends only control execution. The file is always read by the format hook list on **`FormatConfig`**: empty uses the native CSV or Excel hook, and a non-empty list replaces it. Hook options stay in **`configuration`**.
+Implementation: **`django_importexport_flow.task.get_import_task_backend`**, **`dispatch_import_request`**; workers call **`django_importexport_flow.tasks.execute_import_request_by_uuid`** (Celery task name **`django_importexport_flow.run_import_request`**). Those backends only control execution. In the standard pipeline, the file is read by the format hook list on **`FormatConfig`**: empty uses the native hook, and a non-empty list replaces it. Hook options stay in **`configuration`**.
+
+### Business import processors
+
+Set `{"import_processor": "myapp.imports.process_register"}` on an import
+**`CategoryConfig.configuration`** to replace generic validation and row persistence
+for that category. Keep its file formats enabled on `FormatConfig`. The processor
+receives `(file, context)` instead of running the format hook chain and may reuse
+the normal readers itself. Use a filename with the enabled format's extension.
+The dotted path uses the same `ALLOWED_HOOK_MODULE_PREFIXES` setting as custom
+format hooks.
+
+Import `ImportProcessorContext` and `ImportProcessorResult` from
+`django_importexport_flow.engine.core.processor`. The context exposes the
+definition, format key, initiating user, a copy of the saved `filter_payload`,
+and `preview_only`. Put business options needed on relaunch in `filter_payload`;
+for example, `process_import(..., filter_payload={"fr_get_company_id": "42", "reset": True})`.
+The result uses `errors` to signal failure and `imported_row_count` to report
+the number of committed rows. It can also provide `warnings`, a preview
+`dataframe`, corresponding `column_paths`, and an optional total `row_count`.
+
+The API and admin call the processor in preview mode without committing any
+writes on Django's default database. Processors must also avoid external
+side effects during preview. Confirmed imports run atomically on that database:
+exceptions or returned errors roll back the processor's writes. Flow retains
+ownership of the uploaded file and audit row, and a relaunch reuses the saved
+file and filter payload with the current definition. Imports without a
+processor keep the standard pipeline and its partial-import behavior.
 
 ### Partial import
 

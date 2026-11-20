@@ -227,6 +227,8 @@ class Command(BaseCommand):
                 file=upload_buf,
                 import_definition_key=definition_key,
                 max_bytes=max_bytes,
+                user=user,
+                filter_payload=payload,
             )
             return upload_buf, report
 

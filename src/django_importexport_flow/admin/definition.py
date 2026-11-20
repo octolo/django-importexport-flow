@@ -10,7 +10,6 @@ from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel, admin_boost_link, admin_boost_view
 from django_boosted.decorators import AdminBoostViewConfig
 
-from ..engine.core.hooks import run_import_hook
 from ..engine.core.import_ import create_import_request
 from ..forms import (
     MAX_TABULAR_IMPORT_BYTES,
@@ -292,16 +291,15 @@ def _call_import_step(request, obj, form, action, *, memory_message, log_label):
     return {"form": form, **_UPLOAD_FORM_CONTEXT}
 
 
-def _load_preview_dataframe(request, obj, ask):
+def _validate_stored_import(request, obj, ask):
     try:
-        return run_import_hook(
-            obj,
-            ask.data_file,
-            {
-                "max_bytes": MAX_TABULAR_IMPORT_BYTES,
-                "name": getattr(ask.data_file, "name", "") or "",
-            },
-        ).dataframe
+        return validate_import(
+            file=ask.data_file,
+            import_definition=obj,
+            max_bytes=MAX_TABULAR_IMPORT_BYTES,
+            user=ask.initiated_by,
+            filter_payload=ask.filter_payload,
+        )
     except MemoryError:
         logger.exception(
             "Not enough memory reading import file for import definition pk=%s",
@@ -495,6 +493,7 @@ class ImportWorkflow:
 
     def _import_upload_step(self, request, obj, form, cleaned):
         upload = cleaned["file"]
+        filter_payload = _filter_keys_from_cleaned(cleaned)
         validated = _call_import_step(
             request,
             obj,
@@ -503,6 +502,8 @@ class ImportWorkflow:
                 file=upload,
                 import_definition=obj,
                 max_bytes=MAX_TABULAR_IMPORT_BYTES,
+                user=request.user,
+                filter_payload=filter_payload,
             ),
             memory_message=_("Not enough memory to validate this file."),
             log_label="validate_import",
@@ -522,7 +523,7 @@ class ImportWorkflow:
             lambda: create_import_request(
                 obj,
                 upload,
-                _filter_keys_from_cleaned(cleaned),
+                filter_payload,
                 request.user,
                 inferred_column_paths=validated["column_paths"],
             ),
@@ -594,11 +595,10 @@ class ImportWorkflow:
             )
             return HttpResponseRedirect(change_url)
 
-        df = _load_preview_dataframe(request, obj, ask)
-        if df is None:
+        out = _validate_stored_import(request, obj, ask)
+        if out is None:
             return HttpResponseRedirect(change_url)
 
-        out = validate_import(dataframe=df, import_definition=obj)
         for w in out["warnings"]:
             messages.warning(request, w)
         if out["errors"]:
@@ -606,12 +606,11 @@ class ImportWorkflow:
                 messages.error(request, e)
             return HttpResponseRedirect(change_url)
 
-        df_preview = out["dataframe"] if out["dataframe"] is not None else df
         preview_labels = out["validation_dataset"]["column_labels"]
         resolved_cols = out["column_paths"]
         payload = build_import_preview_list_payload(
             self,
-            df_preview,
+            out["dataframe"],
             resolved_cols,
             preview_labels,
         )

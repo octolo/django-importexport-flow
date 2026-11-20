@@ -20,6 +20,7 @@ from ..engine.core.import_ import (
     sample_headers_for_import_definition,
     validate_import_preview,
 )
+from ..engine.core.processor import run_import_processor
 from ..forms import MAX_TABULAR_IMPORT_BYTES
 from ..models import Definition, ExportRequest, ImportRequest
 from ..utils.helpers import get_setting, normalize_table_column, resolve_column_header
@@ -222,6 +223,8 @@ def process_import(
             import_definition=definition,
             max_bytes=limit,
             row_limit=preview_row_limit,
+            user=user,
+            filter_payload=filter_payload,
         )
 
     ask = create_import_request(
@@ -252,12 +255,16 @@ def validate_import(
     import_definition_key: str | None = None,
     max_bytes: int | None = None,
     row_limit: int | None = None,
+    user: Any | None = None,
+    filter_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Validate tabular data against an :class:`~django_importexport_flow.models.Definition`,
     and build a **validation dataset**: column paths, human labels, and preview rows.
 
     Pass either ``file`` (uploaded file / file-like) or ``dataframe`` (already parsed).
+    When using a file, ``user`` and ``filter_payload`` are passed to an optional
+    category processor. Passing a dataframe always uses generic validation.
 
     This wraps :func:`~django_importexport_flow.engine.core.import_.validate_import_preview` and adds
     ``validation_dataset`` with ``rows`` (up to ``row_limit``, default from setting
@@ -280,6 +287,34 @@ def validate_import(
     if dataframe is not None:
         df = dataframe
     elif file is not None:
+        result = run_import_processor(
+            definition,
+            file,
+            user=user,
+            filter_payload=filter_payload,
+            preview_only=True,
+            max_bytes=limit,
+        )
+        if result is not None:
+            frame = result.dataframe
+            paths = result.column_paths or (
+                [str(column) for column in frame.columns] if frame is not None else []
+            )
+            if frame is None:
+                frame = pd.DataFrame(columns=paths)
+            preview = _validation_dataset(
+                frame, paths, resolved_headers_for_import(definition, paths), row_limit=preview_cap
+            )
+            if result.row_count is not None:
+                preview["row_count"] = result.row_count
+            return {
+                "errors": result.errors,
+                "warnings": result.warnings,
+                "column_paths": paths,
+                "dataframe": frame,
+                "row_count": preview["row_count"],
+                "validation_dataset": preview,
+            }
         dataset = run_import_hook(
             definition,
             file,

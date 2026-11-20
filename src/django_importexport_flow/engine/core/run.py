@@ -22,6 +22,7 @@ from .items import (
 )
 from .paths import IMPORT_COLUMN_PATHS_KEY, effective_import_column_paths
 from .preview import normalize_import_dataframe
+from .processor import run_import_processor
 
 
 def create_import_request(
@@ -360,6 +361,18 @@ def run_import_request(ask: Any) -> Any:
         from django_importexport_flow.models.request import request_file
 
         source = request_file(ask, "data_file")
+        result = run_import_processor(
+            import_definition,
+            source,
+            user=ask.initiated_by,
+            filter_payload=ask.filter_payload,
+            preview_only=False,
+            max_bytes=max_bytes,
+        )
+        if result is not None:
+            return _complete_import_request(
+                ask, 0 if result.errors else result.imported_row_count, result.errors
+            )
         dataset = run_import_hook(
             import_definition,
             source,
@@ -403,13 +416,17 @@ def run_import_request(ask: Any) -> Any:
         ask.save(update_fields=["status", "error_trace", "completed_at"])
         return ask
 
-    ask.imported_row_count = n
+    return _complete_import_request(ask, n, row_errs)
+
+
+def _complete_import_request(ask: Any, row_count: int, errors: list[str]) -> Any:
+    ask.imported_row_count = row_count
     ask.completed_at = timezone.now()
-    if row_errs:
-        ask.status = cast("str", ImportRequest.Status.FAILURE)
-        ask.error_trace = "\n".join(row_errs)
+    if errors:
+        ask.status = ask.Status.FAILURE
+        ask.error_trace = "\n".join(errors)
     else:
-        ask.status = cast("str", ImportRequest.Status.SUCCESS)
+        ask.status = ask.Status.SUCCESS
         ask.error_trace = ""
     ask.save(
         update_fields=[
