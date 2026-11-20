@@ -94,6 +94,25 @@ jobs:
       - name: Type check
         run: mypy src/django_importexport_flow
 
+  analyze:
+    name: Analyze Python
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+
   install:
     name: Non-editable install
     runs-on: ubuntu-latest

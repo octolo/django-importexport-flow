@@ -84,11 +84,10 @@ runs `manage.py check` and pytest.
 The quality job, on Python 3.12 and Django 5.2, adds Ruff, the CI migration
 check, `git diff --check`, coverage, Bandit, pip-audit, Vulture, Xenon, and
 mypy. A separate job installs the project without editable mode and checks
-that the admin templates are present. The CodeQL workflow is separate: its
-syntax was checked locally, but its result is known only after the next
-GitHub Actions run. The build job waits for the matrix, the quality job, and
-that install. It builds the package, runs `twine check`, and checks the wheel
-contents.
+that the admin templates are present. The same workflow runs CodeQL as the
+independent **Analyze Python** job. The build job waits for the matrix, the
+quality job, and the install check. It builds the package, runs `twine check`,
+and checks the wheel contents.
 
 CI mypy covers `src/django_importexport_flow`, migrations excluded.
 
@@ -118,9 +117,8 @@ block is allowed.
 
 The repository has no lockfile: a library publishes compatible version ranges,
 and each deployed project must pin its own environment. Semgrep is not
-installed. CodeQL is added in `.github/workflows/codeql.yml`; that GitHub check
-has not run yet. The coverage threshold stays intentionally at 72%, below the
-measured 77.24%.
+installed. CodeQL runs in [the CI workflow](../.github/workflows/ci.yml).
+The coverage threshold stays intentionally at 72%, below the measured 77.24%.
 
 ## Deployment
 
