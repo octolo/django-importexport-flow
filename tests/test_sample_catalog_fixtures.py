@@ -166,6 +166,35 @@ def test_fixture_showcase_and_bookmark_columns():
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("language", "expected_headers"),
+    [
+        ("fr", ["Titre", "Pages", "Prix", "Métadonnées"]),
+        ("en", ["Title"]),
+    ],
+)
+def test_fixture_export_restores_translated_headers_without_catalog(language, expected_headers):
+    definition = _export("report_export_books.json")
+
+    with translation.override(language):
+        engine = ExportTableEngine(definition, request=build_request_with_get({"min_pages": "0"}))
+        headers = engine.get_headers()
+
+    assert headers[: len(expected_headers)] == expected_headers
+
+
+@pytest.mark.django_db
+def test_fixture_import_accepts_translated_headers_without_catalog():
+    definition = _import("report_import_books_match.json")
+
+    with translation.override("en"):
+        result = process_import(file=_csv("import_books_labels.csv"), import_definition=definition)
+
+    assert result["success"] is True
+    assert Book.objects.get(title="The Habit of Excellence").pages == 322
+
+
+@pytest.mark.django_db
 def test_fixture_column_labels_translate_headers_and_import():
     _catalog()
     with translation.override("fr"):

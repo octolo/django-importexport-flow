@@ -37,7 +37,9 @@ from tests.sample.models import Author, AuthorProfile, Book, FieldShowcase, Gene
 from tests.support import attach_import_spreadsheet, attach_pdf_export, attach_tabular_export
 
 OUT_DIR = Path(__file__).resolve().parent
+CATALOG = OUT_DIR.parent / "fixtures" / "sample_catalog.json"
 PREFIX = "Sample fixture —"
+TRANSLATED_FIXTURES = {"report_export_books.json", "report_import_books_match.json"}
 
 
 def _dump(objects) -> dict:
@@ -49,7 +51,20 @@ def _dump(objects) -> dict:
     return {"format_version": 2, "objects": json.loads(raw)}
 
 
-def _write(name: str, payload: dict) -> None:
+def _write(name: str, definition: Definition) -> None:
+    payload = _dump(_iter_tree(definition))
+    if name in TRANSLATED_FIXTURES:
+        target = payload["objects"][0]["fields"]["target"]
+        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+        rows = [
+            {key: obj["fields"][key] for key in ("path", "language", "label")}
+            for obj in catalog
+            if obj["model"] == "django_importexport_flow.columntranslation"
+            and obj["fields"]["content_type"] == target
+        ]
+        payload["column_translations"] = sorted(
+            rows, key=lambda row: (row["path"], row["language"])
+        )
     path = OUT_DIR / name
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print("Wrote", path.name)
@@ -275,7 +290,7 @@ def main() -> None:
         (showcase, "report_export_showcase.json"),
         (bookmarks, "report_export_bookmarks.json"),
     ):
-        _write(filename, _dump(_iter_tree(definition)))
+        _write(filename, definition)
 
     def _import(name: str, description: str, model, **fields) -> Definition:
         return Definition.objects.create(
@@ -355,7 +370,7 @@ def main() -> None:
     ]
     for filename, definition in imports:
         attach_import_spreadsheet(definition)
-        _write(filename, _dump(_iter_tree(definition)))
+        _write(filename, definition)
 
     Definition.objects.filter(name__startswith=PREFIX).delete()
     Definition.objects.filter(name__startswith=PREFIX).delete()

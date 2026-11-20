@@ -130,5 +130,15 @@
         "template": ""
       }
     }
+  ],
+  "column_translations": [
+    {"path": "metadata", "language": "fr", "label": "Métadonnées"},
+    {"path": "metadata.lang", "language": "fr", "label": "Langue"},
+    {"path": "pages", "language": "fr", "label": "Pages"},
+    {"path": "price", "language": "fr", "label": "Prix"},
+    {"path": "tags.name", "language": "fr", "label": "Étiquette"},
+    {"path": "title", "language": "en", "label": "Title"},
+    {"path": "title", "language": "fr", "label": "Titre"},
+    {"path": "title_len", "language": "fr", "label": "Longueur du titre"}
   ]
 }

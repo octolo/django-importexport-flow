@@ -43,6 +43,24 @@ INSTALLED_APPS = [
 python manage.py migrate django_importexport_flow
 ```
 
+## Configuration JSON with column translations
+
+Use **Export configuration and translations (JSON)** on an import or export definition
+in the admin, or pass `include_column_translations=True` to
+`serialize_import_definition()` or `serialize_export_configuration()`. Ordinary JSON
+downloads are unchanged. The optional `column_translations` array contains `path`,
+`language`, and `label` for the target model's catalog. The JSON identifies that model
+by its Django app and model names rather than by a database-specific content type ID.
+
+Import the file through the normal configuration import. Admin users also need the
+**Can add column translation** permission. Missing translations are created, identical
+ones are reused, and a conflicting label aborts the whole import. Translations are
+shared by all definitions targeting that model.
+
+For examples, see the sample [Books export](../tests/sample/report_fixtures/report_export_books.json)
+and [Books import](../tests/sample/report_fixtures/report_import_books_match.json). Both
+bundle the Book translations from the [sample catalog](../tests/sample/fixtures/sample_catalog.json).
+
 ## License
 
 MIT (repository root).

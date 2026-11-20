@@ -166,10 +166,12 @@ import logging
 from collections.abc import Callable
 
 from django.contrib import messages
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.serializers.base import DeserializationError
 from django.db import IntegrityError
 from django.http import HttpRequest
+
+from ..utils.serialization import COLUMN_TRANSLATIONS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +189,10 @@ def run_json_configuration_import(
     Returns the imported instance on success, or ``None`` on failure (the view
     should then return ``{"form": form}``).
     """
+    if form.import_data.get(COLUMN_TRANSLATIONS_KEY) and not request.user.has_perm(
+        "django_importexport_flow.add_columntranslation"
+    ):
+        raise PermissionDenied
     try:
         return import_fn(form.import_data)
     except (ValueError, ValidationError) as exc:

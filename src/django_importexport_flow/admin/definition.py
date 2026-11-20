@@ -234,6 +234,11 @@ class ExportWorkflow:
     def export_configuration_json(self, request, obj):
         return configuration_json_download_response(obj, serialize_export_configuration(obj))
 
+    @admin_boost_view("json", _("Export configuration and translations (JSON)"))
+    def export_configuration_with_translations_json(self, request, obj):
+        payload = serialize_export_configuration(obj, include_column_translations=True)
+        return configuration_json_download_response(obj, payload)
+
     @admin_boost_view("adminform", _("Import configuration (JSON)"))
     def import_configuration_json(self, request, form=None):
         if not self.has_add_permission(request) and not self.has_change_permission(request):
@@ -424,6 +429,11 @@ class ImportWorkflow:
     @admin_boost_view("json", _("Export configuration (JSON)"))
     def export_import_definition_json(self, request, obj):
         return configuration_json_download_response(obj, serialize_import_definition(obj))
+
+    @admin_boost_view("json", _("Export configuration and translations (JSON)"))
+    def export_import_definition_with_translations_json(self, request, obj):
+        payload = serialize_import_definition(obj, include_column_translations=True)
+        return configuration_json_download_response(obj, payload)
 
     @admin_boost_view("adminform", _("Import configuration (JSON)"))
     def import_import_definition_json(self, request, form=None):
