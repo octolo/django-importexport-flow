@@ -39,9 +39,6 @@ def attach_filter_context_fields(
     url_req = _("Required for this import.") if for_import else _("Required for this export.")
     fr, _mandatory, get_m, kw_map = parse_filter_maps_from_definition(source)
     mgr_fr, _m2, mgr_get_m, mgr_kw_map = parse_manager_kwargs_maps_from_definition(source)
-    manager_method_get = normalize_manager_method_kwargs_request(
-        parse_manager_method_kwargs_request_from_definition(source)
-    )
     all_get_params = set(fr) | set(get_m)
     for param_name in sorted(all_get_params):
         orm_field = get_m.get(param_name, fr.get(param_name))
@@ -83,6 +80,13 @@ def attach_filter_context_fields(
             required=False,
             help_text=url_req,
         )
+    _attach_manager_method_fields(form, source)
+
+
+def _attach_manager_method_fields(form: forms.Form, source: Any) -> None:
+    manager_method_get = normalize_manager_method_kwargs_request(
+        parse_manager_method_kwargs_request_from_definition(source)
+    )
     for param_name, (method_kwarg, value_type) in sorted(manager_method_get.items()):
         form.fields[form_field_name_for_manager_method_query_param(param_name)] = forms.CharField(
             label=_("Manager method GET “%(param)s” → %(argument)s")
@@ -110,46 +114,30 @@ def clean_filter_context_data(
     mgr_get_all = set(mgr_fr) | set(mgr_get_m)
 
     def _clean_fr_field(fname: str, *, required: bool) -> None:
+        if fname not in form.fields:
+            return
         merged = (cleaned.get(fname) or "").strip()
-        if required:
-            if not merged:
-                form.add_error(fname, _("This field is required."))
-            else:
-                cleaned[fname] = merged
+        if required and not merged:
+            form.add_error(fname, _("This field is required."))
         else:
             cleaned[fname] = merged
 
     for param_name in sorted(all_get_params):
-        in_man = param_name in get_m
-        fname = form_field_name_for_query_param(param_name)
-        if fname not in form.fields:
-            continue
-        _clean_fr_field(fname, required=in_man)
+        _clean_fr_field(form_field_name_for_query_param(param_name), required=param_name in get_m)
 
     for kw_name in sorted(kw_map):
-        fname = form_field_name_for_url_kwarg(kw_name)
-        if fname not in form.fields:
-            continue
-        _clean_fr_field(fname, required=True)
+        _clean_fr_field(form_field_name_for_url_kwarg(kw_name), required=True)
 
     for param_name in sorted(mgr_get_all):
-        in_man = param_name in mgr_get_m
-        fname = form_field_name_for_manager_query_param(param_name)
-        if fname not in form.fields:
-            continue
-        _clean_fr_field(fname, required=in_man)
+        _clean_fr_field(
+            form_field_name_for_manager_query_param(param_name), required=param_name in mgr_get_m
+        )
 
     for kw_name in sorted(mgr_kw_map):
-        fname = form_field_name_for_manager_url_kwarg(kw_name)
-        if fname not in form.fields:
-            continue
-        _clean_fr_field(fname, required=True)
+        _clean_fr_field(form_field_name_for_manager_url_kwarg(kw_name), required=True)
 
     for param_name in sorted(manager_method_get):
-        fname = form_field_name_for_manager_method_query_param(param_name)
-        if fname not in form.fields:
-            continue
-        _clean_fr_field(fname, required=False)
+        _clean_fr_field(form_field_name_for_manager_method_query_param(param_name), required=False)
 
 
 def reorder_filter_fields_first(
