@@ -174,13 +174,16 @@ def _serialize_definition(
 
 
 def _import_column_translation(definition: Definition, entry: Any) -> None:
+    target_id = definition.target_id
+    if target_id is None:
+        raise ValueError(_("Column translations require a definition target model."))
     if not isinstance(entry, dict) or not all(
         isinstance(entry.get(field), str) and entry[field].strip()
         for field in ("path", "language", "label")
     ):
         raise ValueError(_("Each column translation requires a path, language, and label."))
     incoming = ColumnTranslation(
-        content_type_id=definition.target_id,
+        content_type_id=target_id,
         path=entry["path"],
         language=entry["language"],
         label=entry["label"],
@@ -223,8 +226,6 @@ def _import_definition(data: dict[str, Any], direction: str) -> Definition:
             raise ValueError(
                 _("No %(direction)s definition entry found in file.") % {"direction": direction}
             )
-        if translations and definition.target_id is None:
-            raise ValueError(_("Column translations require a definition target model."))
         for entry in translations:
             _import_column_translation(definition, entry)
     return definition
