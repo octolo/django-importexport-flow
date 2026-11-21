@@ -8,6 +8,7 @@ from io import BytesIO, StringIO
 from typing import Any, cast
 
 import pandas as pd
+from django.http import HttpResponse
 
 from ..engine.core.export import (
     snapshot_export_filter_payload,
@@ -23,11 +24,19 @@ from ..engine.core.import_ import (
 from ..engine.core.processor import run_import_processor
 from ..forms import MAX_TABULAR_IMPORT_BYTES
 from ..models import Definition, ExportRequest, ImportRequest
-from ..utils.helpers import get_setting, normalize_table_column, resolve_column_header
+from .helpers import (
+    dated_export_filename,
+    get_setting,
+    normalize_table_column,
+    resolve_column_header,
+    safe_download_stem,
+)
+from .http import content_disposition_attachment
 from .lookup import (
     get_export_definition_by_uuid_or_named_id,
     get_import_definition_by_uuid_or_named_id,
 )
+from .translations import language_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -421,21 +430,61 @@ def _import_csv_delimiter(import_definition: Definition) -> str:
     return delim
 
 
+def _example_configuration(definition: Definition) -> dict[str, Any]:
+    category = definition.category_configs.filter(category_key="spreadsheet").first()
+    configuration = category.configuration if category else None
+    return configuration if isinstance(configuration, dict) else {}
+
+
+def _localized_example_value(values: object) -> object | None:
+    if isinstance(values, dict):
+        for language in language_candidates():
+            if values.get(language):
+                return values[language]
+    return None
+
+
+def _example_columns(definition: Definition) -> tuple[list[str], list[str]]:
+    configuration = _example_configuration(definition)
+    columns = configuration.get("template_columns")
+    if columns is None or columns == []:
+        paths = effective_import_column_paths(definition)
+        return paths, sample_headers_for_import_definition(definition, column_paths=paths)
+    if not isinstance(columns, list) or not all(
+        isinstance(column, str) and column.strip() for column in columns
+    ):
+        raise ValueError("template_columns must be a list of non-empty strings.")
+
+    labels = _localized_example_value(configuration.get("template_labels_by_language"))
+    if labels is None:
+        labels = configuration.get("template_labels") or columns
+    if (
+        not isinstance(labels, list)
+        or len(labels) != len(columns)
+        or not all(isinstance(label, str) for label in labels)
+    ):
+        raise ValueError("Template labels must provide one string per template column.")
+    return columns, labels
+
+
 def generate_example_file(
     import_definition: Definition,
     *,
     example_format: str,
 ) -> tuple[bytes, str, str]:
-    """
-    Build an empty **example** import file (headers + blank row) for a definition.
+    """Build an example import file from configured columns or model paths.
 
-    ``example_format`` is ``"csv"``, ``"excel"``, or ``"json"`` (same as admin export format choices).
+    Args:
+        import_definition: Definition providing the template configuration.
+        example_format: One of ``csv``, ``excel``, or ``json``.
 
-    Returns ``(body_bytes, content_type, extension)`` where ``extension`` includes the leading dot
-    (e.g. ``".csv"``).
+    Returns:
+        File bytes, MIME type, and extension including the leading dot.
+
+    Raises:
+        ValueError: If the format or template columns and labels are invalid.
     """
-    paths = effective_import_column_paths(import_definition)
-    labels = sample_headers_for_import_definition(import_definition, column_paths=paths)
+    paths, labels = _example_columns(import_definition)
 
     if example_format == "json":
         df = pd.DataFrame([{p: "" for p in paths}])
@@ -478,3 +527,36 @@ def generate_example_file(
         )
 
     raise ValueError(f"example_format must be csv, excel, or json; got {example_format!r}.")
+
+
+def import_example_download_response(
+    definition: Definition,
+    *,
+    example_format: str,
+    fallback_name: str | None = None,
+    dated: bool = False,
+) -> HttpResponse:
+    """Generate a template attachment using the active language.
+
+    Args:
+        definition: Definition providing the template and filename configuration.
+        example_format: One of ``csv``, ``excel``, or ``json``.
+        fallback_name: Filename stem to use instead of the definition name.
+        dated: Whether to append a timestamp before the extension.
+
+    Returns:
+        A downloadable HTTP response with a safe filename.
+
+    Raises:
+        ValueError: If the format or template configuration is invalid.
+    """
+    body, content_type, ext = generate_example_file(definition, example_format=example_format)
+    names = _example_configuration(definition).get("template_filename")
+    name = _localized_example_value(names)
+    if name is not None and not isinstance(name, str):
+        raise ValueError("A localized template filename must be a string.")
+    stem = safe_download_stem(name or fallback_name or definition.name, fallback="example")
+    filename = dated_export_filename(stem, ext) if dated else f"{stem}{ext}"
+    response = HttpResponse(body, content_type=content_type)
+    response["Content-Disposition"] = content_disposition_attachment(filename)
+    return response

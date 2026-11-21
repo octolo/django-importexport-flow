@@ -29,7 +29,7 @@ from ..models import (
 )
 from ..utils.helpers import dated_export_filename, get_setting, safe_download_stem
 from ..utils.http import configuration_json_download_response, content_disposition_attachment
-from ..utils.process import generate_example_file, run_export_with_audit, validate_import
+from ..utils.process import import_example_download_response, run_export_with_audit, validate_import
 from ..utils.recoverable_errors import TABULAR_ENGINE_RECOVERABLE
 from ..utils.serialization import (
     import_export_configuration,
@@ -464,13 +464,11 @@ class ImportWorkflow:
         if form is None:
             return {"form": ImportExampleFileForm()}
         fmt = form.cleaned_data["example_format"]
-        body, content_type, ext = generate_example_file(obj, example_format=fmt)
-        basename = safe_download_stem(obj.name, fallback="example")
-        response = HttpResponse(body, content_type=content_type)
-        response["Content-Disposition"] = content_disposition_attachment(
-            dated_export_filename(basename, ext)
-        )
-        return response
+        try:
+            return import_example_download_response(obj, example_format=fmt, dated=True)
+        except ValueError as exc:
+            form.add_error("example_format", str(exc))
+            return {"form": form}
 
     @admin_boost_view(
         "adminform",

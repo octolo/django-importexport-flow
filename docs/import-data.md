@@ -37,6 +37,33 @@ ownership of the uploaded file and audit row, and a relaunch reuses the saved
 file and filter payload with the current definition. Imports without a
 processor keep the standard pipeline and its partial-import behavior.
 
+### Custom import templates
+
+Set these optional keys on the spreadsheet **`CategoryConfig.configuration`**:
+
+```json
+{
+  "template_columns": ["holder", "quantity"],
+  "template_labels": ["Titulaire", "Quantité"],
+  "template_labels_by_language": {"en": ["Holder", "Quantity"]},
+  "template_filename": {"fr": "Modèle de registre", "en": "Register template"}
+}
+```
+
+`template_columns` overrides the example file's technical headers without changing
+which columns the import engine accepts. A processor can define its own keys.
+CSV and Excel templates keep those keys on the first row, followed by the labels
+and an empty row. JSON examples use only the technical keys. Each label list must
+contain one entry per column. Without an explicit column list, Flow derives the
+headers from the target model as before.
+
+Flow uses the active Django language (including regional and project-default
+fallbacks) for localized values. Without a matching label list it uses
+`template_labels` or the technical keys. Use `import_example_download_response`
+from `django_importexport_flow.utils.process` in your own views to share the
+admin's template generator and filename resolution. Without a matching filename,
+it uses the caller's fallback or the definition name.
+
 ### Partial import
 
 Imports use batches of up to **`TABULAR_IMPORT_BATCH_SIZE`** (default **500**, from
