@@ -16,6 +16,7 @@ from django_importexport_flow.models import Definition
 from django_importexport_flow.utils.process import (
     generate_example_file,
     import_example_download_response,
+    normalize_template_headers,
     process_import,
     validate_import,
 )
@@ -109,7 +110,9 @@ def test_generate_example_file_csv_json_excel():
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("file_format", ["csv", "excel"])
-def test_configured_template_keeps_technical_keys_and_localizes_download(file_format):
+@pytest.mark.parametrize("localized", [False, True])
+def test_configured_template_localizes_download(file_format, localized):
+    """Retain the technical row unless the definition opts into localized headers."""
     definition = Definition.objects.create(
         direction="import",
         name="Books import",
@@ -122,6 +125,8 @@ def test_configured_template_keeps_technical_keys_and_localizes_download(file_fo
         "template_labels_by_language": {"en": ["Holder", "Quantity"]},
         "template_filename": {"en": "Register template"},
     }
+    if localized:
+        category.configuration["template_header_mode"] = "localized"
     category.save()
 
     with override("en-gb"):
@@ -135,12 +140,53 @@ def test_configured_template_keeps_technical_keys_and_localizes_download(file_fo
         rows = [list(row) for row in workbook["Sheet1"].values]
         workbook.close()
         extension = "xlsx"
-    assert rows[:2] == [["holder", "quantity"], ["Holder", "Quantity"]]
-    assert len(rows) == 3
-    assert all(not cell for cell in rows[2])
+    expected = [["Holder", "Quantity"]]
+    if not localized:
+        expected.insert(0, ["holder", "quantity"])
+    assert rows[:-1] == expected
+    assert all(not cell for cell in rows[-1])
     assert (
         response["Content-Disposition"] == f'attachment; filename="Register_template.{extension}"'
     )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "headers",
+    [
+        ["Quantity", "quantity"],
+        ["Quantity", "Quantity.1"],
+    ],
+)
+def test_normalize_template_headers_rejects_duplicate_keys(headers):
+    """Reject both mixed aliases and duplicate headers suffixed by pandas."""
+    definition = Definition.objects.create(direction="import", name="Example")
+    category = attach_import_spreadsheet(definition)
+    category.configuration = {
+        "template_columns": ["quantity"],
+        "template_labels": ["Quantity"],
+    }
+    category.save()
+
+    with pytest.raises(ValueError, match="[Dd]uplicate|Multiple headers"):
+        normalize_template_headers(definition, pd.DataFrame([[1, 2]], columns=headers))
+
+
+@pytest.mark.django_db
+def test_localized_template_rejects_ambiguous_aliases_across_languages():
+    """Reject an alias shared by different keys even across languages."""
+    definition = Definition.objects.create(direction="import", name="Example")
+    category = attach_import_spreadsheet(definition)
+    category.configuration = {
+        "template_header_mode": "localized",
+        "template_columns": ["holder", "quantity"],
+        "template_labels": ["Titulaire", "Quantité"],
+        "template_labels_by_language": {"en": ["Holder", "Titulaire"]},
+    }
+    category.save()
+
+    with pytest.raises(ValueError, match="ambiguous template header"):
+        generate_example_file(definition, example_format="csv")
 
 
 @pytest.mark.django_db

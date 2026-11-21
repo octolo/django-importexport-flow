@@ -444,27 +444,104 @@ def _localized_example_value(values: object) -> object | None:
     return None
 
 
-def _example_columns(definition: Definition) -> tuple[list[str], list[str]]:
-    configuration = _example_configuration(definition)
+def _configured_example_columns(configuration: dict[str, Any]) -> list[str]:
     columns = configuration.get("template_columns")
     if columns is None or columns == []:
-        paths = effective_import_column_paths(definition)
-        return paths, sample_headers_for_import_definition(definition, column_paths=paths)
+        return []
     if not isinstance(columns, list) or not all(
         isinstance(column, str) and column.strip() for column in columns
     ):
         raise ValueError("template_columns must be a list of non-empty strings.")
+    return columns
 
-    labels = _localized_example_value(configuration.get("template_labels_by_language"))
-    if labels is None:
-        labels = configuration.get("template_labels") or columns
+
+def _validate_example_labels(labels: object, columns: list[str]) -> list[str]:
     if (
         not isinstance(labels, list)
         or len(labels) != len(columns)
         or not all(isinstance(label, str) for label in labels)
     ):
         raise ValueError("Template labels must provide one string per template column.")
-    return columns, labels
+    return labels
+
+
+def _template_header_aliases(configuration: dict[str, Any], columns: list[str]) -> dict[str, str]:
+    aliases = {column.strip(): column for column in columns}
+    if len(aliases) != len(columns):
+        raise ValueError("Template column keys must be unique.")
+    translated = configuration.get("template_labels_by_language", {})
+    if not isinstance(translated, dict):
+        raise ValueError(  # noqa: TRY004 - invalid template configuration is a ValueError
+            "template_labels_by_language must map languages to label lists."
+        )
+    for labels in (configuration.get("template_labels") or columns, *translated.values()):
+        for label, column in zip(_validate_example_labels(labels, columns), columns, strict=True):
+            key = label.strip()
+            if not key or aliases.setdefault(key, column) != column:
+                raise ValueError(f"Empty or ambiguous template header: {label!r}.")
+    return aliases
+
+
+def normalize_template_headers(definition: Definition, frame: pd.DataFrame) -> pd.DataFrame:
+    """Map template aliases to processor keys in any configured language.
+
+    Args:
+        definition: Import definition providing template columns and aliases.
+        frame: Parsed spreadsheet, with headers taken from its first row.
+
+    Returns:
+        A dataframe with canonical template keys and unrecognized headers unchanged.
+
+    Raises:
+        ValueError: If configured aliases or matched spreadsheet headers are ambiguous.
+    """
+    configuration = _example_configuration(definition)
+    columns = _configured_example_columns(configuration)
+    if not columns:
+        return frame
+    aliases = _template_header_aliases(configuration, columns)
+    header_keys = {str(header).strip() for header in frame.columns}
+    seen: set[str] = set()
+    headers: list[Any] = []
+    for header in frame.columns:
+        key = str(header).strip()
+        column = aliases.get(key)
+        if column is None:
+            # Pandas appends numeric suffixes when a physical header is repeated.
+            base, _, suffix = key.rpartition(".")
+            base = base.strip()
+            if suffix.isdecimal() and base in aliases and base in header_keys:
+                raise ValueError(f"Duplicate template header: {header!r}.")
+            headers.append(header)
+            continue
+        if column in seen:
+            raise ValueError(f"Multiple headers map to template column {column!r}.")
+        seen.add(column)
+        headers.append(column)
+    return frame.set_axis(headers, axis="columns")
+
+
+def _example_spreadsheet(
+    definition: Definition,
+    configuration: dict[str, Any],
+    paths: list[str],
+    configured_paths: list[str],
+) -> pd.DataFrame:
+    localized = configuration.get("template_header_mode") == "localized"
+    if localized:
+        if not configured_paths:
+            raise ValueError("Localized template headers require template_columns.")
+        _template_header_aliases(configuration, paths)
+    if configured_paths:
+        raw_labels = _localized_example_value(configuration.get("template_labels_by_language"))
+        if raw_labels is None:
+            raw_labels = configuration.get("template_labels") or paths
+        labels = _validate_example_labels(raw_labels, paths)
+    else:
+        labels = sample_headers_for_import_definition(definition, column_paths=paths)
+    blank = [""] * len(paths)
+    rows = [blank] if localized else [labels, blank]
+    return pd.DataFrame(rows if paths else [], columns=labels if localized else paths)
 
 
 def generate_example_file(
@@ -484,7 +561,9 @@ def generate_example_file(
     Raises:
         ValueError: If the format or template columns and labels are invalid.
     """
-    paths, labels = _example_columns(import_definition)
+    configuration = _example_configuration(import_definition)
+    configured_paths = _configured_example_columns(configuration)
+    paths = configured_paths or effective_import_column_paths(import_definition)
 
     if example_format == "json":
         df = pd.DataFrame([{p: "" for p in paths}])
@@ -495,17 +574,12 @@ def generate_example_file(
             ".json",
         )
 
+    frame = _example_spreadsheet(import_definition, configuration, paths, configured_paths)
+
     if example_format == "csv":
         delim = _import_csv_delimiter(import_definition)
-        if not isinstance(delim, str) or len(delim) != 1:
-            delim = ","
         buffer = StringIO()
-        df_csv = (
-            pd.DataFrame([labels, [""] * len(paths)], columns=paths)
-            if paths
-            else pd.DataFrame(columns=paths)
-        )
-        df_csv.to_csv(buffer, index=False, sep=delim)
+        frame.to_csv(buffer, index=False, sep=delim)
         return (
             buffer.getvalue().encode("utf-8"),
             "text/csv; charset=utf-8",
@@ -514,12 +588,7 @@ def generate_example_file(
 
     if example_format == "excel":
         stream = BytesIO()
-        df_xlsx = (
-            pd.DataFrame([labels, [""] * len(paths)], columns=paths)
-            if paths
-            else pd.DataFrame(columns=paths)
-        )
-        df_xlsx.to_excel(stream, index=False, sheet_name="Sheet1", engine="openpyxl")
+        frame.to_excel(stream, index=False, sheet_name="Sheet1", engine="openpyxl")
         return (
             stream.getvalue(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

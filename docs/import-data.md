@@ -64,6 +64,15 @@ from `django_importexport_flow.utils.process` in your own views to share the
 admin's template generator and filename resolution. Without a matching filename,
 it uses the caller's fallback or the definition name.
 
+For a custom processor, set `"template_header_mode": "localized"` to generate
+CSV and Excel templates with only the translated header row. The processor
+must call `normalize_template_headers(definition, dataframe)` from
+`django_importexport_flow.utils.process` after reading the file. It maps labels
+from all configured languages back to the technical keys, regardless of the
+active language or column order. Technical headers remain valid, and unrelated
+headers are left unchanged. Ambiguous aliases and multiple headers mapping to
+the same key are rejected. JSON still uses technical keys.
+
 ### Partial import
 
 Imports use batches of up to **`TABULAR_IMPORT_BATCH_SIZE`** (default **500**, from
