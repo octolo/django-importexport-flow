@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
+from django.core.files.utils import validate_file_name
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
@@ -17,6 +19,9 @@ from .formats import (
     require_format,
 )
 from .overrides import merge_format_overrides
+
+if TYPE_CHECKING:
+    from ...models import ExportRequest
 
 ExportResult = tuple[bytes, str, str]
 
@@ -33,8 +38,6 @@ def _native_hook_paths() -> set[str]:
 
 def assert_custom_hook_allowed(path: str) -> None:
     """Reject custom hooks outside ``ALLOWED_HOOK_MODULE_PREFIXES`` when that list is set."""
-    from django.core.exceptions import ValidationError
-
     from ...utils.helpers import get_setting
 
     if path in _native_hook_paths():
@@ -54,6 +57,36 @@ def _load_hook(path: str) -> Any:
     if not callable(hook):
         raise TypeError(f"Hook {path!r} is not callable.")
     return hook
+
+
+def default_export_filenames(export_request: ExportRequest, extension: str) -> tuple[str, str]:
+    """Return the historical storage and download filenames, respectively."""
+    from ...utils.helpers import dated_export_filename, safe_download_stem
+
+    stem = safe_download_stem(export_request.export_definition.name, fallback="export")
+    return f"export{extension}", dated_export_filename(stem, extension)
+
+
+def resolve_export_filenames(export_request: ExportRequest, extension: str) -> tuple[str, str]:
+    """Resolve the storage and download names, using a custom hook only once."""
+    path = export_request.export_definition.filename_hook
+    if not path:
+        return default_export_filenames(export_request, extension)
+
+    filename = _load_hook(path)(export_request, extension)
+    if (
+        not isinstance(filename, str)
+        or not filename.strip()
+        or "\\" in filename
+        or '"' in filename
+        or any(ord(char) < 32 or ord(char) == 127 for char in filename)
+    ):
+        raise ValidationError(_("The filename hook must return a valid basename."))
+    try:
+        validate_file_name(filename)
+    except SuspiciousFileOperation as exc:
+        raise ValidationError(_("The filename hook must return a valid basename.")) from exc
+    return filename, filename
 
 
 def build_export_dataset(

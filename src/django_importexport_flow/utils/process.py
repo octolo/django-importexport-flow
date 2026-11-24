@@ -367,6 +367,24 @@ def run_export_with_audit(
     :exc:`~django.core.exceptions.ValidationError`, :exc:`ValueError`,
     :exc:`OSError`, :exc:`MemoryError`, etc.
     """
+    content, content_type, ext, _filename = _run_export_with_audit_and_filename(
+        export_definition=export_definition,
+        filter_payload=filter_payload,
+        user=user,
+        template_override=template_override,
+        configuration_overrides=configuration_overrides,
+    )
+    return content, content_type, ext
+
+
+def _run_export_with_audit_and_filename(
+    *,
+    export_definition: Definition,
+    filter_payload: dict[str, Any],
+    user: Any | None,
+    template_override: str = "",
+    configuration_overrides: dict[str, Any] | None = None,
+) -> tuple[bytes, str, str, str]:
     from ..engine.core.overrides import (
         normalize_configuration_overrides,
         validate_template_override,
@@ -405,11 +423,11 @@ def run_export_with_audit(
             template_override=er.template_override,
             configuration_overrides=er.configuration_overrides,
         )
+        filename = _finalize_native_export(er, content, ext)
     except Exception:
         _mark_request_failure(er, traceback.format_exc())
         raise
-    _finalize_native_export(er, content, ext)
-    return content, content_type, ext
+    return content, content_type, ext, filename
 
 
 def _import_csv_delimiter(import_definition: Definition) -> str:

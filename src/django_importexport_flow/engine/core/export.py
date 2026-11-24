@@ -147,7 +147,7 @@ def run_table_export(
     ``fr_get_*``, ``fr_kw_*``, optional ``mg_*`` and ``mm_get_*``) or an equivalent dict.
 
     Returns ``(body_bytes, content_type, file_extension)`` — e.g. ``(".csv")``.
-    The download filename (with timestamp) is set in the admin view.
+    Filenames are resolved separately when an export request is finalized.
     """
     proxy, request = _bound_export(definition, filter_payload)
     engine = TableEngine(proxy, request=request)

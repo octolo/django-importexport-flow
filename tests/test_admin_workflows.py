@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import PurePosixPath
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -44,10 +47,10 @@ def _staff(*permissions: Permission):
     return user
 
 
-def _export_definition():
+def _export_definition(**kwargs):
     ct = ContentType.objects.get_for_model(Book)
     definition = Definition.objects.create(
-        direction="export", name="Admin export", target=ct, manager="objects"
+        direction="export", name="Admin export", target=ct, manager="objects", **kwargs
     )
     attach_tabular_export(export=definition, columns=["title"], configuration={}, formats=("csv",))
     pdf = attach_pdf_export(export=definition, template="<p>stored</p>")
@@ -73,9 +76,13 @@ def _import_definition():
 
 
 @pytest.mark.django_db
-def test_export_admin_download_and_invalid_post(client):
+@pytest.mark.parametrize("custom_filename", [False, True])
+def test_export_admin_download_and_invalid_post(client, settings, tmp_path, custom_filename):
+    settings.MEDIA_ROOT = tmp_path
     User.objects.create_superuser("admin", "admin@test.local", "secret")
-    definition = _export_definition()
+    definition = _export_definition(
+        filename_hook="tests.test_admin_workflows.custom_export_filename" if custom_filename else ""
+    )
     client.login(username="admin", password="secret")
     url = reverse(
         "admin:django_importexport_flow_exportdefinition_process_export",
@@ -91,12 +98,25 @@ def test_export_admin_download_and_invalid_post(client):
 
     downloaded = client.post(url, {"export_format": "csv"})
     assert downloaded.status_code == 200
-    assert "attachment" in downloaded["Content-Disposition"]
-    assert (
-        downloaded["Content-Disposition"].endswith('.csv"')
-        or ".csv" in downloaded["Content-Disposition"]
-    )
+    export_request = ExportRequest.objects.get(export_definition=definition)
+    stored_name = PurePosixPath(export_request.output_file.name).name
+    if custom_filename:
+        assert (
+            downloaded["Content-Disposition"]
+            == f'attachment; filename="books-{export_request.pk}.csv"'
+        )
+        assert stored_name == f"books-{export_request.pk}.csv"
+    else:
+        assert re.fullmatch(
+            r'attachment; filename="Admin_export_\d{8}_\d{6}\.csv"',
+            downloaded["Content-Disposition"],
+        )
+        assert stored_name == "export.csv"
     assert b"Shelf" in downloaded.content
+
+
+def custom_export_filename(export_request, extension):
+    return f"books-{export_request.pk}{extension}"
 
 
 @pytest.mark.django_db

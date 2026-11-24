@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import PurePosixPath
 
 import pytest
 from django.contrib.contenttypes.models import ContentType
@@ -13,6 +14,44 @@ from django_importexport_flow.models import Definition, ExportRequest
 from django_importexport_flow.utils.process import run_export_with_audit
 from tests.sample.models import Book
 from tests.support import attach_tabular_export
+
+
+def custom_export_filename(export_request, extension):
+    return f"books-{export_request.pk}{extension}"
+
+
+def invalid_export_filename(_export_request, extension):
+    return f"../books{extension}"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("hook_name", "success"),
+    [("custom_export_filename", True), ("invalid_export_filename", False)],
+)
+def test_export_request_applies_filename_hook(settings, tmp_path, hook_name, success):
+    settings.MEDIA_ROOT = tmp_path
+    definition = Definition.objects.create(
+        direction="export",
+        name="Filename hook",
+        target=ContentType.objects.get_for_model(Book),
+        filename_hook=f"tests.test_export_audit.{hook_name}",
+    )
+    attach_tabular_export(export=definition, columns=["title"], configuration={})
+    Book.objects.create(title="Filename hook")
+    export_request = ExportRequest(export_definition=definition, export_format="json")
+    export_request.save(trigger_processing=True, asynchronous=False)
+    export_request.refresh_from_db()
+
+    if success:
+        assert export_request.status == ExportRequest.Status.SUCCESS
+        assert (
+            PurePosixPath(export_request.output_file.name).name == f"books-{export_request.pk}.json"
+        )
+    else:
+        assert export_request.status == ExportRequest.Status.FAILURE
+        assert "valid basename" in export_request.error_trace
+        assert not export_request.output_file
 
 
 @pytest.mark.django_db

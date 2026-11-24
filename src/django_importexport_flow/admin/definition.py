@@ -27,9 +27,13 @@ from ..models import (
     ImportDefinition,
     ImportRequest,
 )
-from ..utils.helpers import dated_export_filename, get_setting, safe_download_stem
+from ..utils.helpers import get_setting
 from ..utils.http import configuration_json_download_response, content_disposition_attachment
-from ..utils.process import import_example_download_response, run_export_with_audit, validate_import
+from ..utils.process import (
+    _run_export_with_audit_and_filename,
+    import_example_download_response,
+    validate_import,
+)
 from ..utils.recoverable_errors import TABULAR_ENGINE_RECOVERABLE
 from ..utils.serialization import (
     import_export_configuration,
@@ -88,7 +92,7 @@ def _export_file_response(request, obj, form):
     cleaned = form.cleaned_data
     user = request.user if getattr(request.user, "is_authenticated", False) else None
     try:
-        content, content_type, ext = run_export_with_audit(
+        content, content_type, _ext, filename = _run_export_with_audit_and_filename(
             export_definition=obj,
             filter_payload=cleaned,
             user=user,
@@ -111,7 +115,6 @@ def _export_file_response(request, obj, form):
         logger.exception("Unexpected export failure for export definition pk=%s", obj.pk)
         messages.error(request, _("Export failed."))
         return {"form": form}
-    filename = dated_export_filename(safe_download_stem(obj.name, fallback="export"), ext)
     response = HttpResponse(content, content_type=content_type)
     response["Content-Disposition"] = content_disposition_attachment(filename)
     return response
@@ -139,6 +142,7 @@ class ExportWorkflow:
     inlines = (CategoryConfigInline,)
     fieldsets = (
         (None, {"fields": ("name", "named_id", "uuid", "description")}),
+        (_("Output"), {"fields": ("filename_hook",)}),
         (
             _("Model and queryset"),
             {

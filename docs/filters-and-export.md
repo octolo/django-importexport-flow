@@ -78,6 +78,25 @@ A template supplied on the request is trusted content with the same rendering ca
 
 CSV and Excel exports prefix text that a spreadsheet could execute. A value whose first non-space character is `=`, `+`, `-`, or `@` is written with a leading `'`. Numbers, dates, booleans, empty values, and text that already starts with `'` are left unchanged. JSON exports are not rewritten. Set `ESCAPE_SPREADSHEET_FORMULAS` to `False` to keep the historical text.
 
+## Export filenames
+
+Set **Filename hook** (`filename_hook`) on an export definition to a dotted path,
+for example `myapp.exports.report_filename`. The callable runs once, after the
+format hook, and receives the `ExportRequest` (including the definition and
+filter payload) and the extension with its leading dot:
+
+```python
+def report_filename(export_request, extension):
+    return f"report-{export_request.pk}{extension}"
+```
+
+Return a filename including its extension, without any directory components.
+The same name is used for the direct admin download and passed to Django storage;
+the storage backend can still adjust it (for example to avoid a collision).
+If `filename_hook` is empty, the default keeps the existing behavior:
+`<sanitized definition name>_YYYYMMDD_HHMMSS.ext` for the direct download
+and `export.ext` for storage. Custom hooks honor `ALLOWED_HOOK_MODULE_PREFIXES`.
+
 ## Shared helpers (for integrators)
 
 - **`parse_filter_maps` / `parse_filter_maps_from_definition`** (`engine/core/validation.py`) — normalized dicts for forms and `run_table_export`.

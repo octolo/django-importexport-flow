@@ -116,6 +116,15 @@ class Definition(AuditMixin, models.Model):
         verbose_name=_("Order by"),
         help_text=_('List of field names for QuerySet.order_by, e.g. ["title", "-pages"].'),
     )
+    filename_hook = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("Filename hook"),
+        help_text=_(
+            "Export only. Dotted path to a filename hook. Leave empty for the default names."
+        ),
+    )
     filter_config = models.JSONField(
         default=dict,
         blank=True,
@@ -190,6 +199,15 @@ class Definition(AuditMixin, models.Model):
     def clean(self) -> None:
         super().clean()
         self._clean_unused_direction_fields()
+        if self.filename_hook:
+            from ..engine.core.hooks import _load_hook
+
+            try:
+                _load_hook(self.filename_hook)
+            except ValidationError as exc:
+                raise ValidationError({"filename_hook": exc.messages}) from exc
+            except (ImportError, TypeError) as exc:
+                raise ValidationError({"filename_hook": str(exc)}) from exc
         target = self.target
         if target is None:
             return
@@ -202,6 +220,8 @@ class Definition(AuditMixin, models.Model):
             self._clean_import(model)
 
     def _clean_unused_direction_fields(self) -> None:
+        if self.direction == self.Direction.IMPORT and self.filename_hook:
+            raise ValidationError({"filename_hook": _("Filename hooks are only used for exports.")})
         if self.direction == self.Direction.EXPORT and (
             _filled(self.columns_exclude) or _filled(self.match_fields)
         ):

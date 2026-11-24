@@ -40,21 +40,23 @@ def _build_er_filter_payload(er: Any) -> dict[str, Any]:
     return payload
 
 
-def _finalize_native_export(er: Any, content: bytes, ext: str) -> None:
+def _finalize_native_export(er: Any, content: bytes, ext: str) -> str:
     """
-    Persist a successful export onto *er* and save it.
+    Persist a successful export onto *er* and return the download filename.
 
     Shared by :func:`process_export_request` and
     :func:`~django_importexport_flow.utils.process.run_export_with_audit`
     so any field addition only needs a single change.
     """
     from ...models.request import attach_export_file, persist_export_request_files
+    from .hooks import resolve_export_filenames
 
+    storage_name, download_name = resolve_export_filenames(er, ext)
     er.status = er.Status.SUCCESS
     er.output_bytes = len(content)
     er.error_trace = ""
     er.completed_at = timezone.now()
-    attach_export_file(er, f"export{ext}", content)
+    attach_export_file(er, storage_name, content)
     update_fields = [
         "status",
         "output_bytes",
@@ -64,6 +66,7 @@ def _finalize_native_export(er: Any, content: bytes, ext: str) -> None:
     if persist_export_request_files():
         update_fields.append("output_file")
     er.save(update_fields=update_fields)
+    return download_name
 
 
 def process_import_request(ask: Any) -> Any:
@@ -113,8 +116,8 @@ def process_export_request(er: Any) -> Any:
             template_override=er.template_override or "",
             configuration_overrides=er.configuration_overrides or {},
         )
+        _finalize_native_export(er, content, ext)
     except Exception:  # noqa: BLE001 — export hooks may raise anything
         _mark_request_failure(er, traceback.format_exc())
         return er
-    _finalize_native_export(er, content, ext)
     return er
