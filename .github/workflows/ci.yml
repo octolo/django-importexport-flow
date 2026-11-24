@@ -187,6 +187,89 @@ jobs:
           python -m twine check dist/*
           python .github/scripts/check-wheel-contents.py dist/*.whl
 
+      - name: Upload built wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-wheels
+          path: dist/*.whl
+          if-no-files-found: error
+
+
+  install-wheels:
+    name: Install built wheels in a clean environment
+    needs: build
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download built wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "built-wheels*"
+          path: ${{ runner.temp }}/built-wheels
+          merge-multiple: true
+      - name: Install and verify wheels outside the checkout
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=("$RUNNER_TEMP"/built-wheels/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::Expected 1 built wheel(s), found ${#wheels[@]}."
+            exit 1
+          fi
+          python - "${wheels[@]}" <<'PY'
+          from email.parser import BytesParser
+          import re
+          import sys
+          from zipfile import ZipFile
+
+          names = []
+          for wheel in sys.argv[1:]:
+              with ZipFile(wheel) as archive:
+                  metadata = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+                  if len(metadata) != 1:
+                      raise SystemExit(f"Invalid wheel metadata: {wheel}")
+                  name = BytesParser().parsebytes(archive.read(metadata[0]))["Name"]
+                  if not name:
+                      raise SystemExit(f"Missing wheel distribution name: {wheel}")
+                  names.append(re.sub(r"[-_.]+", "-", name).lower())
+          if sorted(names) != ['django-importexport-flow']:
+              raise SystemExit(f"Unexpected wheel distributions: {names}")
+          PY
+          python -m venv "$RUNNER_TEMP/wheel-test"
+          unset PYTHONPATH
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-test/bin/python" -m pip install "${wheels[@]}" "Django==5.2.*"
+          "$RUNNER_TEMP/wheel-test/bin/python" -m pip check
+          "$RUNNER_TEMP/wheel-test/bin/python" - <<'PY'
+          import importlib
+          from importlib.metadata import distribution
+          from pathlib import Path
+
+          import django
+          from django.conf import settings
+          settings.configure(
+              SECRET_KEY="wheel-smoke-test",
+              INSTALLED_APPS=["django.contrib.contenttypes", "django.contrib.auth"],
+              DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
+          )
+          django.setup()
+
+          for name, module_name in [('django-importexport-flow', 'django_importexport_flow')]:
+              dist = distribution(name)
+              module = importlib.import_module(module_name)
+              location = Path(module.__file__).resolve()
+              files = dist.files
+              if files is None or location not in {Path(dist.locate_file(file)).resolve() for file in files}:
+                  raise SystemExit(f"{module_name} was not imported from the installed {name} wheel: {location}")
+              print(f"{name} {dist.version}: {location}")
+          PY
+
   local-audit:
     name: Full audit (progressive)
     runs-on: ubuntu-latest

@@ -53,6 +53,10 @@ thresholds. Xenon enforces the existing complexity thresholds.
 CI also runs this audit in a separate non-blocking job; the existing quality,
 test, and build jobs retain their current blocking checks.
 
+CI also installs the built wheel(s) in a clean environment and checks their
+dependencies and imports without publishing. This installation check is
+non-blocking during the initial rollout.
+
 The coverage gate is **72%** branch-aware coverage (`fail_under` in `pyproject.toml`). The measured result on 18 November 2026 is **77.24%** across **231** tests. The same run stays clean when resource warnings, unraisable exceptions, and unordered pagination warnings are treated as errors. Mypy covers the whole package, migrations excluded. See [current-state audit](current-state-audit.md).
 
 ## Package layout
