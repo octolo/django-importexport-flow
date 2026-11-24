@@ -70,6 +70,15 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m pip install "Django==5.2.*"
 
+      - name: Radon maintainability report
+        continue-on-error: true
+        run: |
+          if ! report=$(python -m radon mi src/django_importexport_flow -s -e '*/migrations/*'); then
+            echo "::warning::Radon could not generate the maintainability report."
+            exit 1
+          fi
+          printf '### Radon maintainability index\n\n```\n%s\n```\n' "$report" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Ruff
         run: |
           ruff check src tests
@@ -177,3 +186,35 @@ jobs:
           python -m build
           python -m twine check dist/*
           python .github/scripts/check-wheel-contents.py dist/*.whl
+
+  local-audit:
+    name: Full audit (progressive)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install audit dependencies
+        id: audit_setup
+        continue-on-error: true
+        run: python -m pip install -e ".[dev]" "Django==5.2.*"
+      - name: Report setup failure
+        if: steps.audit_setup.outcome == 'failure'
+        run: |
+          echo "::warning::Audit dependencies could not be installed; the full audit did not run."
+          echo "Audit dependencies could not be installed; the full audit did not run." >> "$GITHUB_STEP_SUMMARY"
+      - name: Run audit
+        id: audit
+        if: steps.audit_setup.outcome == 'success'
+        continue-on-error: true
+        run: make audit PYTHON=python
+      - name: Report audit findings
+        if: steps.audit.outcome == 'failure'
+        run: |
+          echo "::warning::The full audit reported failures; see the audit step."
+          echo "Full audit reported failures; see the audit step." >> "$GITHUB_STEP_SUMMARY"

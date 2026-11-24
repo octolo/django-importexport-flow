@@ -131,13 +131,16 @@ used by Celery or django-rq.
 ## Reference commands
 
 ```bash
-./audit.sh
-./audit.sh > audit-report.txt 2>&1
+make audit
+python scripts/audit.py > audit-report.txt 2>&1
 ```
 
 The script runs Django check, Ruff, pytest with coverage and strict warnings,
 Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, Twine, and the wheel
 contents check. Redirect the output yourself if you want a file.
+Use `python scripts/audit.py` if Make is not installed.
+The CI quality job also publishes Radon's maintainability index in its job
+summary without enforcing a threshold. Radon's code size metrics remain local.
 `makemigrations` is not part of that script.
 
 Development command details are in [Development](development.md).

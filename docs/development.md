@@ -28,6 +28,8 @@ bandit -r src/django_importexport_flow -x src/django_importexport_flow/migration
 pip-audit .
 vulture src/django_importexport_flow --min-confidence 90 --exclude '*/migrations/*'
 radon cc src/django_importexport_flow -s -a -e '*/migrations/*'
+radon mi src/django_importexport_flow -s -e '*/migrations/*'
+radon raw src/django_importexport_flow -s -e '*/migrations/*'
 xenon src/django_importexport_flow --exclude '*/migrations/*' --max-absolute C --max-modules B --max-average A
 mypy src/django_importexport_flow
 ```
@@ -37,11 +39,19 @@ warnings, Bandit, pip-audit, Vulture, Radon, Xenon, mypy, build, Twine, and
 the wheel contents check):
 
 ```bash
-./audit.sh
-./audit.sh > audit-report.txt 2>&1
+make audit
+make audit PYTHON=/path/to/python
+python scripts/audit.py > audit-report.txt 2>&1
 ```
 
+With the development environment active, run `python scripts/audit.py` directly
+on Windows, macOS, or Linux without Make or Bash. The audit requires Python
+3.11+, the `dev` dependencies, and Git for the whitespace check.
 `makemigrations` is not part of the audit script.
+Radon reports complexity, maintainability, and code size without applying
+thresholds. Xenon enforces the existing complexity thresholds.
+CI also runs this audit in a separate non-blocking job; the existing quality,
+test, and build jobs retain their current blocking checks.
 
 The coverage gate is **72%** branch-aware coverage (`fail_under` in `pyproject.toml`). The measured result on 18 November 2026 is **77.24%** across **231** tests. The same run stays clean when resource warnings, unraisable exceptions, and unordered pagination warnings are treated as errors. Mypy covers the whole package, migrations excluded. See [current-state audit](current-state-audit.md).
 
