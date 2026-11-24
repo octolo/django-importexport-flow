@@ -57,9 +57,17 @@ Import the file through the normal configuration import. Admin users also need t
 ones are reused, and a conflicting label aborts the whole import. Translations are
 shared by all definitions targeting that model.
 
-For examples, see the sample [Books export](../tests/sample/report_fixtures/report_export_books.json)
-and [Books import](../tests/sample/report_fixtures/report_import_books_match.json). Both
+For examples, see the sample [Books export](../tests/sample/importexport_fixtures/report_export_books.json)
+and [Books import](../tests/sample/importexport_fixtures/report_import_books_match.json). Both
 bundle the Book translations from the [sample catalog](../tests/sample/fixtures/sample_catalog.json).
+
+The [combined Books import](../tests/sample/importexport_fixtures/report_import_books_combined.json)
+first runs the Books import above, then the [price step](../tests/sample/importexport_fixtures/report_import_books_price.json).
+Import both child definitions before the combined definition. Use the sample
+[CSV](../tests/sample/importexport_fixtures/tabular/import_books_match.csv): the second
+step sets the price to one cent per page. Its sample processor must be allowed by
+`ALLOWED_HOOK_MODULE_PREFIXES` if the allowlist is configured. The preview validates
+steps independently and does not simulate writes from earlier steps.
 
 ## License
 

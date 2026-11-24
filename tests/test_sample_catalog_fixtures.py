@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from django_importexport_flow.utils.serialization import (
 )
 from tests.sample.models import AuthorProfile, Book, FieldShowcase
 
-FIXTURES = Path(__file__).resolve().parent / "sample" / "report_fixtures"
+FIXTURES = Path(__file__).resolve().parent / 'sample' / 'importexport_fixtures'
 TABULAR = FIXTURES / "tabular"
 
 
@@ -224,6 +225,40 @@ def test_fixture_import_match_updates_pages():
     assert result["success"] is True
     assert Book.objects.filter(title="The Habit of Excellence").count() == 1
     assert Book.objects.get(title="The Habit of Excellence").pages == 321
+
+
+@pytest.mark.django_db
+def test_fixture_combined_import_previews_and_runs_in_order(settings):
+    settings.DJANGO_IMPORTEXPORT_FLOW = {
+        'ALLOWED_HOOK_MODULE_PREFIXES': ['tests.sample.import_processors'],
+    }
+    _import('report_import_books_match.json')
+    _import('report_import_books_price.json')
+    definition = _import('report_import_books_combined.json')
+
+    preview = process_import(
+        file=_csv('import_books_match.csv'),
+        import_definition=definition,
+        preview_only=True,
+    )
+    assert not preview['errors']
+    assert preview['validation_dataset']['rows'] == [
+        {'title': 'The Habit of Excellence', 'pages': 321},
+    ]
+    assert [step['position'] for step in preview['steps']] == [1, 2]
+    assert not Book.objects.exists()
+
+    for _ in range(2):
+        result = process_import(
+            file=_csv('import_books_match.csv'),
+            import_definition=definition,
+        )
+        assert result['success'], result['import_request'].error_trace
+        assert result['import_request'].imported_row_count == 2
+        assert Book.objects.count() == 1
+        book = Book.objects.get(title='The Habit of Excellence')
+        assert book.pages == 321
+        assert book.price == Decimal('3.21')
 
 
 @pytest.mark.django_db

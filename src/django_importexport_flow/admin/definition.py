@@ -26,6 +26,7 @@ from ..models import (
     ImportCategoryConfig,
     ImportDefinition,
     ImportRequest,
+    Step,
 )
 from ..utils.helpers import get_setting
 from ..utils.http import configuration_json_download_response, content_disposition_attachment
@@ -50,6 +51,7 @@ from .mixins import (
     match_column,
     model_column,
     output_column,
+    proxy_raw_id_widget,
     run_json_configuration_import,
 )
 from .preview import _filter_keys_from_cleaned, build_import_preview_list_payload
@@ -57,6 +59,24 @@ from .preview import _filter_keys_from_cleaned, build_import_preview_list_payloa
 logger = logging.getLogger(__name__)
 
 _UPLOAD_FORM_CONTEXT = {"import_preview": False, "has_file_field": True}
+
+
+class StepInline(admin.TabularInline):
+    model = Step
+    fk_name = 'parent'
+    extra = 0
+    fields = ('position', 'definition')
+    raw_id_fields = ('definition',)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'definition':
+            kwargs['widget'] = proxy_raw_id_widget(
+                db_field,
+                self.admin_site,
+                ImportDefinition,
+                using=kwargs.get('using'),
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 def _category_change_url(request_admin, category, direction: str) -> str | None:
@@ -121,6 +141,7 @@ def _export_file_response(request, obj, form):
 
 
 class ExportWorkflow:
+    filter_horizontal = ('exclude_relations',)
     list_display = (
         "definition_label",
         "model_label",
@@ -352,9 +373,11 @@ def _import_result_message(request, ask) -> None:
 
 
 class ImportWorkflow:
+    filter_horizontal = ('exclude_relations',)
     list_display = (
         "definition_label",
         "model_label",
+        'steps_label',
         "match_label",
         "filters_label",
         "columns_label",
@@ -378,6 +401,10 @@ class ImportWorkflow:
     @admin.display(description=_("Model"), ordering="target")
     def model_label(self, obj):
         return model_column(self, obj)
+
+    @admin.display(description=_('Steps'), ordering='step_count')
+    def steps_label(self, obj):
+        return obj.step_count
 
     @admin.display(description=_("Match"))
     def match_label(self, obj):
@@ -654,7 +681,7 @@ class ImportDefinitionAdmin(ImportWorkflow, AdminBoostModel):
         category_list_filter("category_configs__category_key", "import"),
         format_list_filter("category_configs__format_configs__format_key", "import"),
     )
-    inlines = (CategoryConfigInline,)
+    inlines = (CategoryConfigInline, StepInline)
     readonly_fields = ImportWorkflow.readonly_fields
 
     def get_queryset(self, request):

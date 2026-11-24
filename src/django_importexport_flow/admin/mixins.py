@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from copy import copy
 from typing import Any
 
+from django.contrib.admin.widgets import ForeignKeyRawIdWidget
 from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 
@@ -46,6 +48,13 @@ _CATEGORY_ICONS = {
         ),
     ),
 }
+
+
+def proxy_raw_id_widget(db_field, admin_site, proxy_model, *, using=None):
+    """Use a registered proxy for a concrete foreign key's admin lookup."""
+    relation = copy(db_field.remote_field)
+    relation.model = proxy_model
+    return ForeignKeyRawIdWidget(relation, admin_site, using=using)
 
 
 def _filled(value: Any) -> bool:
@@ -171,7 +180,7 @@ from django.core.serializers.base import DeserializationError
 from django.db import IntegrityError
 from django.http import HttpRequest
 
-from ..utils.serialization import COLUMN_TRANSLATIONS_KEY
+from ..utils.serialization import COLUMN_TRANSLATIONS_KEY, STEPS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +200,11 @@ def run_json_configuration_import(
     """
     if form.import_data.get(COLUMN_TRANSLATIONS_KEY) and not request.user.has_perm(
         "django_importexport_flow.add_columntranslation"
+    ):
+        raise PermissionDenied
+    if STEPS_KEY in form.import_data and not all(
+        request.user.has_perm(f'django_importexport_flow.{action}_step')
+        for action in ('add', 'change', 'delete')
     ):
         raise PermissionDenied
     try:

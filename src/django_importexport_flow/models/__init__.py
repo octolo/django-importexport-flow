@@ -20,6 +20,7 @@ from .format import (
     ImportExcelFormat,
     ImportFormatConfig,
 )
+from .step import Step
 from .preview import DataPreviewRow
 from .request import (
     BaseRequestRelatedObject,
@@ -57,5 +58,6 @@ __all__ = [
     "ImportRequest",
     "ImportRequestRelatedObject",
     "ImportSpreadsheetConfig",
+    "Step",
     "ImportStructuredDataConfig",
 ]

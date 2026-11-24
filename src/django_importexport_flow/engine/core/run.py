@@ -344,49 +344,39 @@ def _execute_rows(
     )
 
 
-def run_import_request(ask: Any) -> Any:
-    from django_importexport_flow.models import ImportRequest
+def _run_single_import(
+    import_definition: Any,
+    source: Any,
+    *,
+    user: Any,
+    filter_payload: dict[str, Any],
+    max_bytes: int,
+    infer_column_paths: bool = False,
+) -> tuple[int, list[str]]:
+    result = run_import_processor(
+        import_definition,
+        source,
+        user=user,
+        filter_payload=filter_payload,
+        preview_only=False,
+        max_bytes=max_bytes,
+    )
+    if result is not None:
+        return (0 if result.errors else result.imported_row_count), result.errors
+    dataset = run_import_hook(
+        import_definition,
+        source,
+        {"max_bytes": max_bytes, "name": getattr(source, "name", "") or ""},
+    )
+    df = dataset.dataframe
+    fp_payload = dict(filter_payload or {})
+    if infer_column_paths:
+        from .paths import resolve_import_column_paths
 
-    if not isinstance(ask, ImportRequest):
-        raise TypeError("Expected ImportRequest instance.")
-
-    ask.refresh_from_db()
-    if ask.status in (ImportRequest.Status.SUCCESS, ImportRequest.Status.FAILURE):
-        return ask
-
-    import_definition = ask.import_definition
-    max_bytes = get_setting("MAX_TABULAR_IMPORT_BYTES")
-
-    try:
-        from django_importexport_flow.models.request import request_file
-
-        source = request_file(ask, "data_file")
-        result = run_import_processor(
-            import_definition,
-            source,
-            user=ask.initiated_by,
-            filter_payload=ask.filter_payload,
-            preview_only=False,
-            max_bytes=max_bytes,
-        )
-        if result is not None:
-            return _complete_import_request(
-                ask, 0 if result.errors else result.imported_row_count, result.errors
-            )
-        dataset = run_import_hook(
-            import_definition,
-            source,
-            {"max_bytes": max_bytes, "name": getattr(source, "name", "") or ""},
-        )
-        df = dataset.dataframe
-    except Exception:  # noqa: BLE001 — one bad row must not abort the import
-        ask.status = cast("str", ImportRequest.Status.FAILURE)
-        ask.error_trace = traceback.format_exc()
-        ask.completed_at = timezone.now()
-        ask.save(update_fields=["status", "error_trace", "completed_at"])
-        return ask
-
-    fp_payload = dict(ask.filter_payload or {})
+        errors, inferred_paths = resolve_import_column_paths(import_definition, df)
+        if errors:
+            return 0, errors
+        fp_payload[IMPORT_COLUMN_PATHS_KEY] = inferred_paths
     stored_paths = fp_payload.get(IMPORT_COLUMN_PATHS_KEY)
     if stored_paths is not None:
         column_paths = list(stored_paths)
@@ -394,20 +384,44 @@ def run_import_request(ask: Any) -> Any:
         column_paths = list(effective_import_column_paths(import_definition))
     df_norm, norm_errs, meta = normalize_import_dataframe(df, import_definition, column_paths)
     if norm_errs:
-        ask.status = cast("str", ImportRequest.Status.FAILURE)
-        ask.error_trace = "\n".join(norm_errs)
-        ask.completed_at = timezone.now()
-        ask.save(update_fields=["status", "error_trace", "completed_at"])
-        return ask
+        return 0, norm_errs
 
     first_line = int(meta.get("first_data_line", 2))
+    return _execute_rows(
+        import_definition,
+        df_norm,
+        fp_payload,
+        first_data_line_number=first_line,
+    )
 
+
+def run_import_request(ask: Any) -> Any:
+    from django_importexport_flow.models import Definition, ImportRequest
+    from django_importexport_flow.models.request import request_file
+
+    if not isinstance(ask, ImportRequest):
+        raise TypeError("Expected ImportRequest instance.")
+    ask.refresh_from_db()
+    if ask.status in (ImportRequest.Status.SUCCESS, ImportRequest.Status.FAILURE):
+        return ask
+
+    import_definition = ask.import_definition
+    max_bytes = get_setting("MAX_TABULAR_IMPORT_BYTES")
     try:
-        n, row_errs = _execute_rows(
+        source = request_file(ask, "data_file")
+        manager = Definition.objects.db_manager(import_definition._state.db)
+        if manager.has_steps(import_definition.pk):
+            from .combined_import import run_combined_import
+
+            runner = run_combined_import
+        else:
+            runner = _run_single_import
+        n, row_errs = runner(
             import_definition,
-            df_norm,
-            dict(ask.filter_payload or {}),
-            first_data_line_number=first_line,
+            source,
+            user=ask.initiated_by,
+            filter_payload=dict(ask.filter_payload or {}),
+            max_bytes=max_bytes,
         )
     except Exception:  # noqa: BLE001 — one bad row must not abort the import
         ask.status = cast("str", ImportRequest.Status.FAILURE)

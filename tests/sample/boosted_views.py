@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django_boosted import admin_boost_global_view
 
-from django_importexport_flow.models import ColumnTranslation, Definition
+from django_importexport_flow.models import ColumnTranslation, Definition, Step
 from django_importexport_flow.utils.serialization import (
     import_export_configuration,
     import_import_definition,
@@ -32,7 +32,7 @@ from .models import (
 )
 
 SAMPLE_FIXTURE_PREFIX = "Sample fixture —"
-_FIXTURES = Path(__file__).resolve().parent / "report_fixtures"
+_FIXTURES = Path(__file__).resolve().parent / 'importexport_fixtures'
 _SAMPLE_MODELS = (
     GenericBookmark,
     FieldShowcaseDetail,
@@ -69,7 +69,7 @@ def _clear_sample_fixtures() -> None:
     for model in _SAMPLE_MODELS:
         model.objects.all().delete()
     ColumnTranslation.objects.filter(content_type__app_label="sample").delete()
-    Definition.objects.filter(name__startswith=SAMPLE_FIXTURE_PREFIX).delete()
+    Step.objects.filter(parent__name__startswith=SAMPLE_FIXTURE_PREFIX).delete()
     Definition.objects.filter(name__startswith=SAMPLE_FIXTURE_PREFIX).delete()
 
 
@@ -79,8 +79,12 @@ def _load_definition_files() -> tuple[int, int]:
     for path in sorted(_FIXTURES.glob("report_export_*.json")):
         import_export_configuration(json.loads(path.read_text(encoding="utf-8")))
         exports += 1
-    for path in sorted(_FIXTURES.glob("report_import_*.json")):
-        import_import_definition(json.loads(path.read_text(encoding="utf-8")))
+    import_payloads = [
+        json.loads(path.read_text(encoding='utf-8'))
+        for path in sorted(_FIXTURES.glob('report_import_*.json'))
+    ]
+    for payload in sorted(import_payloads, key=lambda data: bool(data.get('steps'))):
+        import_import_definition(payload)
         imports += 1
     return exports, imports
 

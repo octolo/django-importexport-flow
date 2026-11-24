@@ -9,6 +9,7 @@ from django.contrib import admin, messages
 from django.utils.translation import gettext_lazy as _
 
 from ..engine.core.import_ import relaunch_import_request
+from .mixins import proxy_raw_id_widget
 
 
 def _related_scope_summary(obj: Any, limit: int = 5) -> str:
@@ -77,6 +78,7 @@ class ExportRequestRelatedObjectInline(admin.TabularInline):
 @admin.register(ExportRequest)
 class ExportRequestAdmin(admin.ModelAdmin):
     inlines = (ExportRequestRelatedObjectInline,)
+    raw_id_fields = ('export_definition',)
 
     _add_fields_base = (
         "export_definition",
@@ -135,6 +137,12 @@ class ExportRequestAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "export_definition":
             kwargs["queryset"] = ExportDefinition.objects.all()
+            kwargs['widget'] = proxy_raw_id_widget(
+                db_field,
+                self.admin_site,
+                ExportDefinition,
+                using=kwargs.get('using'),
+            )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description=_("Related scope"))
@@ -146,7 +154,7 @@ class ExportRequestAdmin(admin.ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         if obj is None:
-            return ExportRequestAddForm
+            kwargs['form'] = ExportRequestAddForm
         return super().get_form(request, obj, **kwargs)
 
     def get_changeform_initial_data(self, request):
@@ -253,6 +261,7 @@ class ImportRequestRelatedObjectInline(admin.TabularInline):
 class ImportRequestAdmin(admin.ModelAdmin):
     actions = ("relaunch_selected",)
     inlines = (ImportRequestRelatedObjectInline,)
+    raw_id_fields = ('import_definition',)
 
     _add_fields_base = ("import_definition", "data_file", "filter_payload")
 
@@ -304,6 +313,12 @@ class ImportRequestAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "import_definition":
             kwargs["queryset"] = ImportDefinition.objects.all()
+            kwargs['widget'] = proxy_raw_id_widget(
+                db_field,
+                self.admin_site,
+                ImportDefinition,
+                using=kwargs.get('using'),
+            )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description=_("Related scope"))
@@ -315,7 +330,7 @@ class ImportRequestAdmin(admin.ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         if obj is None:
-            return ImportRequestAddForm
+            kwargs['form'] = ImportRequestAddForm
         return super().get_form(request, obj, **kwargs)
 
     def get_changeform_initial_data(self, request):

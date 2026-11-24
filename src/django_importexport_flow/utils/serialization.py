@@ -10,13 +10,14 @@ from django.core import serializers
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
-from ..models import ColumnTranslation, Definition
+from ..models import ColumnTranslation, Definition, Step
 from .helpers import get_setting
 
 FORMAT_VERSION = get_setting("SERIALIZATION_FORMAT_VERSION")
 
 _DEFINITION_MODEL = "django_importexport_flow.definition"
 COLUMN_TRANSLATIONS_KEY = "column_translations"
+STEPS_KEY = 'steps'
 
 _RETIRED_SUFFIXES = frozenset(
     {
@@ -163,6 +164,16 @@ def _serialize_definition(
 ) -> dict[str, Any]:
     objects = json.loads(serializers.serialize("json", _iter_tree(definition)))
     payload: dict[str, Any] = {"format_version": FORMAT_VERSION, "objects": objects}
+    if definition.direction == Definition.Direction.IMPORT:
+        steps = list(
+            definition.steps.select_related('definition')
+            .order_by('position', 'pk')
+        )
+        if steps:
+            payload[STEPS_KEY] = [
+                {'definition': step.definition.named_id, 'position': step.position}
+                for step in steps
+            ]
     if include_column_translations and (target := definition.target) is not None:
         objects[0]["fields"]["target"] = list(target.natural_key())
         payload[COLUMN_TRANSLATIONS_KEY] = list(
@@ -202,6 +213,31 @@ def _import_column_translation(definition: Definition, entry: Any) -> None:
         )
 
 
+def _import_steps(definition: Definition, entries: Any) -> None:
+    if not isinstance(entries, list):
+        raise ValueError(_('Import steps must be a JSON array.'))
+    definition.steps.all().delete()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get('definition'), str)
+            or not isinstance(entry.get('position'), int)
+            or isinstance(entry.get('position'), bool)
+        ):
+            raise ValueError(_('Each import step requires a definition and position.'))
+        child = Definition.objects.filter(
+            direction=Definition.Direction.IMPORT,
+            named_id=entry['definition'],
+        ).first()
+        if child is None:
+            raise ValueError(
+                _('Import step definition not found: %(name)s.')
+                % {'name': entry['definition']}
+            )
+        step = Step(parent=definition, definition=child, position=entry['position'])
+        step.save()
+
+
 def _import_definition(data: dict[str, Any], direction: str) -> Definition:
     objects = _require_current_payload(data)
     translations = data.get(COLUMN_TRANSLATIONS_KEY, [])
@@ -228,6 +264,10 @@ def _import_definition(data: dict[str, Any], direction: str) -> Definition:
             )
         for entry in translations:
             _import_column_translation(definition, entry)
+        if STEPS_KEY in data:
+            if direction != Definition.Direction.IMPORT:
+                raise ValueError(_('Import steps require an import definition.'))
+            _import_steps(definition, data[STEPS_KEY])
     return definition
 
 

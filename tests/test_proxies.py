@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
+from django import forms
 from django.contrib import admin
+from django.contrib.admin.widgets import (
+    FilteredSelectMultiple,
+    ForeignKeyRawIdWidget,
+)
 from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
+from django.forms.models import model_to_dict
 from django.test.utils import CaptureQueriesContext
 from django.urls import NoReverseMatch, reverse
 
@@ -38,6 +46,7 @@ from django_importexport_flow.utils.translations import (
     import_header_aliases,
 )
 from tests.sample.models import Book
+from tests.support import attach_import_spreadsheet, attach_tabular_export
 
 _CONCRETE_MODELS = {
     "django_importexport_flow.definition",
@@ -170,6 +179,131 @@ def test_request_admin_foreign_keys_follow_direction_proxies():
     )
     assert list(export_field.queryset) == [export_row]
     assert list(import_field.queryset) == [import_row]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('direction', 'definition_model'),
+    [('import', ImportDefinition), ('export', ExportDefinition)],
+)
+def test_request_admin_add_uses_proxy_raw_id(
+    direction, definition_model, admin_client, settings
+):
+    settings.DJANGO_IMPORTEXPORT_FLOW = {
+        f'{direction.upper()}_ADMIN_OFFER_ASYNC': False,
+    }
+    definition = definition_model.objects.create(name=f'{direction} definition')
+    other_model = (
+        ExportDefinition if direction == 'import' else ImportDefinition
+    )
+    other = other_model.objects.create(name='Other definition')
+    url = reverse(f'admin:django_importexport_flow_{direction}request_add')
+    response = admin_client.get(url)
+
+    assert response.status_code == 200
+    form = response.context['adminform'].form
+    assert 'name="run_async"' not in response.content.decode()
+    field = form.fields[f'{direction}_definition']
+    assert isinstance(field.widget, ForeignKeyRawIdWidget)
+    assert field.clean(definition.pk).pk == definition.pk
+    with pytest.raises(ValidationError):
+        field.clean(other.pk)
+
+    context = field.widget.get_context(field.label, definition.pk, {})
+    assert context['link_url'] == reverse(
+        f'admin:django_importexport_flow_{direction}definition_change',
+        args=[definition.pk],
+    )
+    lookup = admin_client.get(context['related_url'] + '&_popup=1')
+    assert lookup.status_code == 200
+    ids = {obj.pk for obj in lookup.context['cl'].result_list}
+    assert definition.pk in ids
+    assert other.pk not in ids
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('direction', ['import', 'export'])
+def test_request_admin_add_submits_raw_id(
+    direction, admin_client, settings, tmp_path
+):
+    settings.MEDIA_ROOT = tmp_path
+    model = ImportDefinition if direction == 'import' else ExportDefinition
+    definition = model.objects.create(
+        name=f'{direction} books',
+        target=_target(),
+    )
+    if direction == 'import':
+        definition.columns_exclude = [
+            path for path in default_importable_column_paths(Book)
+            if path != 'title'
+        ]
+        definition.save()
+        attach_import_spreadsheet(definition)
+    else:
+        attach_tabular_export(export=definition, columns=['title'])
+    url = reverse(f'admin:django_importexport_flow_{direction}request_add')
+    page = admin_client.get(url)
+    assert 'name="run_async"' in page.content.decode()
+    inline = page.context['inline_admin_formsets'][0].formset.prefix
+    data = {
+        f'{direction}_definition': str(definition.pk),
+        'filter_payload': '{}',
+        f'{inline}-TOTAL_FORMS': '0',
+        f'{inline}-INITIAL_FORMS': '0',
+        f'{inline}-MIN_NUM_FORMS': '0',
+        f'{inline}-MAX_NUM_FORMS': '1000',
+    }
+    if direction == 'import':
+        data['data_file'] = SimpleUploadedFile(
+            'books.csv', b'title\nNew book\n'
+        )
+    else:
+        data.update(
+            export_format='csv',
+            manager_kwargs_payload='{}',
+            configuration_overrides='{}',
+        )
+
+    response = admin_client.post(url, data)
+
+    assert response.status_code == 302, (
+        response.context['adminform'].form.errors
+    )
+    request_model = ImportRequest if direction == 'import' else ExportRequest
+    result = request_model.objects.get()
+    assert getattr(result, f'{direction}_definition_id') == definition.pk
+    assert result.status == request_model.Status.SUCCESS, result.error_trace
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('direction', 'definition_model'),
+    [('import', ImportDefinition), ('export', ExportDefinition)],
+)
+def test_admin_excluded_relations_dual_list_saves(
+    direction, definition_model, admin_client
+):
+    definition = definition_model.objects.create(name='Definition')
+    response = admin_client.get(
+        reverse(
+            f'admin:django_importexport_flow_{direction}definition_change',
+            args=[definition.pk],
+        ),
+    )
+
+    assert response.status_code == 200
+    form = response.context['adminform'].form
+    widget = form.fields['exclude_relations'].widget
+    assert isinstance(widget.widget, FilteredSelectMultiple)
+    data = model_to_dict(definition, fields=form.fields)
+    for name, field in form.fields.items():
+        if isinstance(field, forms.JSONField):
+            data[name] = json.dumps(data.get(name))
+    data['exclude_relations'] = [str(_target().pk)]
+    bound = form.__class__(data=data, instance=definition)
+    assert bound.is_valid(), bound.errors
+    bound.save()
+    assert list(definition.exclude_relations.all()) == [_target()]
 
 
 @pytest.mark.django_db

@@ -1,0 +1,54 @@
+{
+  "format_version": 2,
+  "objects": [
+    {
+      "model": "django_importexport_flow.definition",
+      "pk": "ee9d9960-eebf-466a-847f-e698b2945afc",
+      "fields": {
+        "direction": "import",
+        "name": "Sample fixture — Import books (combined)",
+        "named_id": "sample-fixture-import-books-combined",
+        "description": "Import books, then set their prices from their page counts.",
+        "target": ["sample", "book"],
+        "manager": "objects.all",
+        "manager_kwargs_config": {},
+        "manager_kwargs_request": {},
+        "manager_kwargs_mandatory": {},
+        "order_by": [],
+        "filter_config": {},
+        "filter_request": {},
+        "filter_mandatory": {},
+        "columns_exclude": [],
+        "exclude_primary_key": true,
+        "match_fields": [],
+        "max_relation_hops": null,
+        "exclude_relations": []
+      }
+    },
+    {
+      "model": "django_importexport_flow.categoryconfig",
+      "pk": 91,
+      "fields": {
+        "configuration": {},
+        "columns": [],
+        "definition": "ee9d9960-eebf-466a-847f-e698b2945afc",
+        "category_key": "spreadsheet"
+      }
+    },
+    {
+      "model": "django_importexport_flow.formatconfig",
+      "pk": 141,
+      "fields": {
+        "configuration": {},
+        "hook": [],
+        "category_config": 91,
+        "format_key": "csv",
+        "template": ""
+      }
+    }
+  ],
+  "steps": [
+    {"definition": "sample-fixture-import-books-match-title", "position": 1},
+    {"definition": "sample-fixture-import-books-set-price", "position": 2}
+  ]
+}

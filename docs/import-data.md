@@ -37,6 +37,44 @@ ownership of the uploaded file and audit row, and a relaunch reuses the saved
 file and filter payload with the current definition. Imports without a
 processor keep the standard pipeline and its partial-import behavior.
 
+### Combined imports
+
+Enable the input format on an import definition and add ordered **Import
+steps** in its admin page. A definition with steps is a combined import; one
+without steps runs as a normal import. Each step references an existing import
+definition. Positions and definitions must be unique within the combined
+import. Nested combined imports are not supported. The import definitions
+admin list displays and allows sorting by the number of steps.
+Use the step lookup to select an existing import definition by ID; excluded
+relation types can be selected with the dual-list widget.
+
+The same file, user and filter payload are passed to each step in order.
+The combined import accepts both standard imports and business processors;
+each step must accept the same file format and headers. The parent definition
+reads the file for the single preview. Each step is validated independently
+without writes, so this preview cannot simulate dependencies on earlier steps.
+For example, a later step cannot preview an object that an earlier step would
+create during confirmation.
+
+Confirmation executes all steps sequentially in one transaction on the
+default database. An error or exception stops execution and rolls back all
+database writes from the steps. External side effects and writes to other
+databases cannot be rolled back; processors must defer side effects until
+commit. Asynchronous processing queues the combined request as a whole, not
+individual steps. Its audit row records the total imported count or the failing
+step and error. Relaunch uses the current step configuration.
+
+The `Step` model stores ordered definition references. Currently, only import
+definitions may use steps; export orchestration is not implemented.
+Definitions fetched through the standard managers have an annotated
+`step_count`: a count greater than zero indicates a combined import. Like any
+query annotation, it is a snapshot; execution checks the current count again.
+
+The JSON configuration for a combined import includes its ordered step
+references by import `named_id`; referenced definitions must already exist when
+the configuration is imported. Importing that JSON in admin requires add,
+change and delete permissions for import steps.
+
 ### Custom import templates
 
 Set these optional keys on the spreadsheet **`CategoryConfig.configuration`**:
@@ -100,9 +138,11 @@ rely on those for every row.
 - **Export audit**: same pattern with **`ExportRequestRelatedObject`** and an inline on **`ExportRequest`** (optional links only; export code can be extended to attach scope when needed).
 
 - **List / change**: read-only trace (status, file, filters, related scope summary, errors).
+- **Add**: select the import or export definition using its raw-ID lookup.
 - **Relaunch** (admin action): creates a **new** pending **`ImportRequest`** with the same file and `filter_payload`, linked via **`relaunched_from`**. Each attempt is kept in history.
 
-Manual add of **`ImportRequest`** in the admin is disabled; rows come from the wizard or **Relaunch**.
+Manual creation of **`ImportRequest`** and **`ExportRequest`** in the admin is
+restricted to superusers. Requests can also come from the wizard or **Relaunch**.
 
 ### Code layout
 

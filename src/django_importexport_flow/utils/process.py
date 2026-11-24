@@ -293,6 +293,21 @@ def validate_import(
         row_limit if row_limit is not None else int(get_setting("IMPORT_PREVIEW_ROW_LIMIT"))
     )
 
+    manager = Definition.objects.db_manager(definition._state.db)
+    if manager.has_steps(definition.pk):
+        if file is None or dataframe is not None:
+            raise ValueError('Combined imports require a file for preview.')
+        from ..engine.core.combined_import import preview_combined_import
+
+        return preview_combined_import(
+            definition,
+            file,
+            user=user,
+            filter_payload=filter_payload,
+            max_bytes=limit,
+            row_limit=preview_cap,
+        )
+
     if dataframe is not None:
         df = dataframe
     elif file is not None:

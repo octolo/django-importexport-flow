@@ -7,7 +7,7 @@ so the JSON does not depend on local ContentType primary keys.
 
 Usage (from the project root):
 
-  DJANGO_SETTINGS_MODULE=tests.settings python tests/sample/report_fixtures/build_fixtures.py
+  DJANGO_SETTINGS_MODULE=tests.settings python tests/sample/importexport_fixtures/build_fixtures.py
 """
 
 from __future__ import annotations
@@ -29,9 +29,10 @@ django.setup()
 
 from django.contrib.contenttypes.models import ContentType
 from django.core import serializers
+from django.db import transaction
 
 from django_importexport_flow.engine.core.paths import default_importable_column_paths
-from django_importexport_flow.models import Definition
+from django_importexport_flow.models import Definition, Step
 from django_importexport_flow.utils.serialization import _iter_tree
 from tests.sample.models import Author, AuthorProfile, Book, FieldShowcase, GenericBookmark
 from tests.support import attach_import_spreadsheet, attach_pdf_export, attach_tabular_export
@@ -53,6 +54,12 @@ def _dump(objects) -> dict:
 
 def _write(name: str, definition: Definition) -> None:
     payload = _dump(_iter_tree(definition))
+    steps = definition.steps.select_related('definition')
+    if steps.exists():
+        payload['steps'] = [
+            {'definition': step.definition.named_id, 'position': step.position}
+            for step in steps
+        ]
     if name in TRANSLATED_FIXTURES:
         target = payload["objects"][0]["fields"]["target"]
         catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -107,8 +114,9 @@ def _pdf(definition: Definition, template: str, configuration: dict | None = Non
     )
 
 
+@transaction.atomic
 def main() -> None:
-    Definition.objects.filter(name__startswith=PREFIX).delete()
+    Step.objects.filter(parent__name__startswith=PREFIX).delete()
     Definition.objects.filter(name__startswith=PREFIX).delete()
 
     rev = next(
@@ -372,7 +380,30 @@ def main() -> None:
         attach_import_spreadsheet(definition)
         _write(filename, definition)
 
-    Definition.objects.filter(name__startswith=PREFIX).delete()
+    price = _import(
+        'Sample fixture — Import books (set price)',
+        'Set each imported book price from its page count.',
+        Book,
+    )
+    price_category = attach_import_spreadsheet(
+        price,
+        {'import_processor': 'tests.sample.import_processors.set_book_price'},
+    )
+    price_category.format_configs.filter(format_key='excel').delete()
+    _write('report_import_books_price.json', price)
+
+    combined = _import(
+        'Sample fixture — Import books (combined)',
+        'Import books, then set their prices from their page counts.',
+        Book,
+    )
+    combined_category = attach_import_spreadsheet(combined)
+    combined_category.format_configs.filter(format_key='excel').delete()
+    Step.objects.create(parent=combined, definition=imports[0][1], position=1)
+    Step.objects.create(parent=combined, definition=price, position=2)
+    _write('report_import_books_combined.json', combined)
+
+    Step.objects.filter(parent__name__startswith=PREFIX).delete()
     Definition.objects.filter(name__startswith=PREFIX).delete()
     print("Reverse accessor on Author for Book:", rev)
 

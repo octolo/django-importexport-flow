@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-importexport-flow"
-version = "1.8.0"
+version = "1.9.0"
 description = "Declarative export and import definitions for Django (queryset, tabular/PDF, hooks)."
 readme = "README.md"
 authors = [{ name = "Octolo", email = "dev@octolo.tech" }]
@@ -115,7 +115,7 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/sample/report_fixtures/build_fixtures.py" = ["E402"]
+"tests/sample/importexport_fixtures/build_fixtures.py" = ["E402"]
 # Django migration operations and dependencies are lists by framework contract.
 "**/migrations/*.py" = ["RUF012"]
 # Invalid payloads raise ValueError; that is the public contract of these helpers.
