@@ -413,16 +413,21 @@ def run_import_request(ask: Any) -> Any:
         if manager.has_steps(import_definition.pk):
             from .combined_import import run_combined_import
 
-            runner = run_combined_import
+            n, row_errs = run_combined_import(
+                import_definition,
+                source,
+                user=ask.initiated_by,
+                filter_payload=dict(ask.filter_payload or {}),
+                max_bytes=max_bytes,
+            )
         else:
-            runner = _run_single_import
-        n, row_errs = runner(
-            import_definition,
-            source,
-            user=ask.initiated_by,
-            filter_payload=dict(ask.filter_payload or {}),
-            max_bytes=max_bytes,
-        )
+            n, row_errs = _run_single_import(
+                import_definition,
+                source,
+                user=ask.initiated_by,
+                filter_payload=dict(ask.filter_payload or {}),
+                max_bytes=max_bytes,
+            )
     except Exception:  # noqa: BLE001 — one bad row must not abort the import
         ask.status = cast("str", ImportRequest.Status.FAILURE)
         ask.error_trace = traceback.format_exc()
