@@ -296,7 +296,7 @@ def validate_import(
     manager = Definition.objects.db_manager(definition._state.db)
     if manager.has_steps(definition.pk):
         if file is None or dataframe is not None:
-            raise ValueError('Combined imports require a file for preview.')
+            raise ValueError("Combined imports require a file for preview.")
         from ..engine.core.combined_import import preview_combined_import
 
         return preview_combined_import(

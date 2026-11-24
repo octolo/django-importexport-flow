@@ -54,11 +54,10 @@ def _dump(objects) -> dict:
 
 def _write(name: str, definition: Definition) -> None:
     payload = _dump(_iter_tree(definition))
-    steps = definition.steps.select_related('definition')
+    steps = definition.steps.select_related("definition")
     if steps.exists():
-        payload['steps'] = [
-            {'definition': step.definition.named_id, 'position': step.position}
-            for step in steps
+        payload["steps"] = [
+            {"definition": step.definition.named_id, "position": step.position} for step in steps
         ]
     if name in TRANSLATED_FIXTURES:
         target = payload["objects"][0]["fields"]["target"]
@@ -381,27 +380,27 @@ def main() -> None:
         _write(filename, definition)
 
     price = _import(
-        'Sample fixture — Import books (set price)',
-        'Set each imported book price from its page count.',
+        "Sample fixture — Import books (set price)",
+        "Set each imported book price from its page count.",
         Book,
     )
     price_category = attach_import_spreadsheet(
         price,
-        {'import_processor': 'tests.sample.import_processors.set_book_price'},
+        {"import_processor": "tests.sample.import_processors.set_book_price"},
     )
-    price_category.format_configs.filter(format_key='excel').delete()
-    _write('report_import_books_price.json', price)
+    price_category.format_configs.filter(format_key="excel").delete()
+    _write("report_import_books_price.json", price)
 
     combined = _import(
-        'Sample fixture — Import books (combined)',
-        'Import books, then set their prices from their page counts.',
+        "Sample fixture — Import books (combined)",
+        "Import books, then set their prices from their page counts.",
         Book,
     )
     combined_category = attach_import_spreadsheet(combined)
-    combined_category.format_configs.filter(format_key='excel').delete()
+    combined_category.format_configs.filter(format_key="excel").delete()
     Step.objects.create(parent=combined, definition=imports[0][1], position=1)
     Step.objects.create(parent=combined, definition=price, position=2)
-    _write('report_import_books_combined.json', combined)
+    _write("report_import_books_combined.json", combined)
 
     Step.objects.filter(parent__name__startswith=PREFIX).delete()
     Definition.objects.filter(name__startswith=PREFIX).delete()

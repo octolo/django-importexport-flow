@@ -5,23 +5,50 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('django_importexport_flow', '0007_definition_filename_hook'),
+        ("django_importexport_flow", "0007_definition_filename_hook"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='Step',
+            name="Step",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('position', models.PositiveIntegerField()),
-                ('definition', models.ForeignKey(limit_choices_to={'direction': 'import'}, on_delete=django.db.models.deletion.PROTECT, related_name='used_by_steps', to='django_importexport_flow.definition')),
-                ('parent', models.ForeignKey(limit_choices_to={'direction': 'import'}, on_delete=django.db.models.deletion.CASCADE, related_name='steps', to='django_importexport_flow.definition')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveIntegerField()),
+                (
+                    "definition",
+                    models.ForeignKey(
+                        limit_choices_to={"direction": "import"},
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="used_by_steps",
+                        to="django_importexport_flow.definition",
+                    ),
+                ),
+                (
+                    "parent",
+                    models.ForeignKey(
+                        limit_choices_to={"direction": "import"},
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="steps",
+                        to="django_importexport_flow.definition",
+                    ),
+                ),
             ],
             options={
-                'ordering': ('position', 'pk'),
-                'constraints': [models.UniqueConstraint(fields=('parent', 'position'), name='step_parent_position_uniq'), models.UniqueConstraint(fields=('parent', 'definition'), name='step_parent_definition_uniq')],
+                "ordering": ("position", "pk"),
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("parent", "position"), name="step_parent_position_uniq"
+                    ),
+                    models.UniqueConstraint(
+                        fields=("parent", "definition"), name="step_parent_definition_uniq"
+                    ),
+                ],
             },
         ),
     ]

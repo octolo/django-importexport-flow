@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-FIXTURES = Path(__file__).resolve().parent / 'sample' / 'importexport_fixtures'
+FIXTURES = Path(__file__).resolve().parent / "sample" / "importexport_fixtures"
 
 
 def _load(name: str) -> dict:
@@ -65,18 +65,18 @@ def test_generator_preserves_combined_steps(monkeypatch, tmp_path):
     from tests.sample.importexport_fixtures import build_fixtures
 
     load_sample_fixtures(replace=False)
-    monkeypatch.setattr(build_fixtures, 'OUT_DIR', tmp_path)
+    monkeypatch.setattr(build_fixtures, "OUT_DIR", tmp_path)
     build_fixtures.main()
 
     def generated(name):
-        return json.loads((tmp_path / name).read_text(encoding='utf-8'))
+        return json.loads((tmp_path / name).read_text(encoding="utf-8"))
 
-    first = import_import_definition(generated('report_import_books_match.json'))
-    second = import_import_definition(generated('report_import_books_price.json'))
+    first = import_import_definition(generated("report_import_books_match.json"))
+    second = import_import_definition(generated("report_import_books_price.json"))
     combined = import_import_definition(
-        generated('report_import_books_combined.json'),
+        generated("report_import_books_combined.json"),
     )
-    assert list(combined.steps.values_list('definition_id', flat=True)) == [
+    assert list(combined.steps.values_list("definition_id", flat=True)) == [
         first.pk,
         second.pk,
     ]
@@ -92,20 +92,23 @@ def test_generator_rolls_back_cleanup_for_external_references(monkeypatch, tmp_p
 
     load_sample_fixtures(replace=False)
     child = Definition.objects.get(
-        named_id='sample-fixture-import-books-match-title',
+        named_id="sample-fixture-import-books-match-title",
     )
     external = Definition.objects.create(
-        direction='import',
-        name='External combined import',
+        direction="import",
+        name="External combined import",
         target=child.target,
     )
     Step.objects.create(parent=external, definition=child, position=1)
-    monkeypatch.setattr(build_fixtures, 'OUT_DIR', tmp_path)
+    monkeypatch.setattr(build_fixtures, "OUT_DIR", tmp_path)
 
     with pytest.raises(ProtectedError):
         build_fixtures.main()
 
-    assert Step.objects.filter(
-        parent__named_id='sample-fixture-import-books-combined',
-    ).count() == 2
+    assert (
+        Step.objects.filter(
+            parent__named_id="sample-fixture-import-books-combined",
+        ).count()
+        == 2
+    )
     assert Step.objects.filter(parent=external, definition=child).exists()

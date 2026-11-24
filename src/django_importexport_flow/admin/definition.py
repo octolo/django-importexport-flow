@@ -63,18 +63,18 @@ _UPLOAD_FORM_CONTEXT = {"import_preview": False, "has_file_field": True}
 
 class StepInline(admin.TabularInline):
     model = Step
-    fk_name = 'parent'
+    fk_name = "parent"
     extra = 0
-    fields = ('position', 'definition')
-    raw_id_fields = ('definition',)
+    fields = ("position", "definition")
+    raw_id_fields = ("definition",)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == 'definition':
-            kwargs['widget'] = proxy_raw_id_widget(
+        if db_field.name == "definition":
+            kwargs["widget"] = proxy_raw_id_widget(
                 db_field,
                 self.admin_site,
                 ImportDefinition,
-                using=kwargs.get('using'),
+                using=kwargs.get("using"),
             )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
@@ -141,7 +141,7 @@ def _export_file_response(request, obj, form):
 
 
 class ExportWorkflow:
-    filter_horizontal = ('exclude_relations',)
+    filter_horizontal = ("exclude_relations",)
     list_display = (
         "definition_label",
         "model_label",
@@ -373,11 +373,11 @@ def _import_result_message(request, ask) -> None:
 
 
 class ImportWorkflow:
-    filter_horizontal = ('exclude_relations',)
+    filter_horizontal = ("exclude_relations",)
     list_display = (
         "definition_label",
         "model_label",
-        'steps_label',
+        "steps_label",
         "match_label",
         "filters_label",
         "columns_label",
@@ -402,7 +402,7 @@ class ImportWorkflow:
     def model_label(self, obj):
         return model_column(self, obj)
 
-    @admin.display(description=_('Steps'), ordering='step_count')
+    @admin.display(description=_("Steps"), ordering="step_count")
     def steps_label(self, obj):
         return obj.step_count
 

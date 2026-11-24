@@ -14,19 +14,15 @@ from .paths import IMPORT_COLUMN_PATHS_KEY
 
 
 def _steps(definition: Any) -> list[Any]:
-    steps = list(definition.steps.select_related('parent', 'definition'))
+    steps = list(definition.steps.select_related("parent", "definition"))
     for step in steps:
         step.clean()
     return steps
 
 
 def _upload(file: Any, max_bytes: int) -> tuple[bytes, str]:
-    name = getattr(file, 'name', '') or ''
-    limit = (
-        max_bytes
-        if max_bytes > 0
-        else int(get_setting('MAX_TABULAR_IMPORT_BYTES'))
-    )
+    name = getattr(file, "name", "") or ""
+    limit = max_bytes if max_bytes > 0 else int(get_setting("MAX_TABULAR_IMPORT_BYTES"))
     return _read_limited(file, limit), name
 
 
@@ -43,7 +39,7 @@ def run_combined_import(
 
     steps = _steps(definition)
     if not steps:
-        raise ValueError('A combined import requires at least one step.')
+        raise ValueError("A combined import requires at least one step.")
     raw, name = _upload(file, max_bytes)
     payload = dict(filter_payload)
     payload.pop(IMPORT_COLUMN_PATHS_KEY, None)
@@ -61,14 +57,10 @@ def run_combined_import(
                         infer_column_paths=True,
                     )
             except Exception as exc:
-                raise RuntimeError(
-                    f'Import step failed: {step.definition.name}'
-                ) from exc
+                raise RuntimeError(f"Import step failed: {step.definition.name}") from exc
             if errors:
                 transaction.set_rollback(True)
-                return 0, [
-                    f'{step.definition.name}: {error}' for error in errors
-                ]
+                return 0, [f"{step.definition.name}: {error}" for error in errors]
             imported += count
     return imported, []
 
@@ -87,21 +79,19 @@ def preview_combined_import(
 
     steps = _steps(definition)
     if not steps:
-        raise ValueError('A combined import requires at least one step.')
+        raise ValueError("A combined import requires at least one step.")
     raw, name = _upload(file, max_bytes)
     with ContentFile(raw, name=name) as source:
         dataset = run_import_hook(
             definition,
             source,
-            {'max_bytes': max_bytes, 'name': name},
+            {"max_bytes": max_bytes, "name": name},
         )
     frame = dataset.dataframe
     columns = [str(column) for column in frame.columns]
     preview = _validation_dataset(frame, columns, columns, row_limit=row_limit)
     errors: list[str] = []
-    warnings = [
-        'Each step is validated independently; earlier steps are not simulated.'
-    ]
+    warnings = ["Each step is validated independently; earlier steps are not simulated."]
     reports = []
     for step in steps:
         try:
@@ -115,29 +105,25 @@ def preview_combined_import(
                     row_limit=row_limit,
                 )
         except Exception as exc:
-            raise RuntimeError(
-                f'Preview failed: {step.definition.name}'
-            ) from exc
-        step_errors = [str(item) for item in result['errors']]
-        step_warnings = [str(item) for item in result['warnings']]
-        errors.extend(f'{step.definition.name}: {item}' for item in step_errors)
-        warnings.extend(
-            f'{step.definition.name}: {item}' for item in step_warnings
-        )
+            raise RuntimeError(f"Preview failed: {step.definition.name}") from exc
+        step_errors = [str(item) for item in result["errors"]]
+        step_warnings = [str(item) for item in result["warnings"]]
+        errors.extend(f"{step.definition.name}: {item}" for item in step_errors)
+        warnings.extend(f"{step.definition.name}: {item}" for item in step_warnings)
         reports.append(
             {
-                'definition': step.definition.named_id,
-                'position': step.position,
-                'errors': step_errors,
-                'warnings': step_warnings,
+                "definition": step.definition.named_id,
+                "position": step.position,
+                "errors": step_errors,
+                "warnings": step_warnings,
             }
         )
     return {
-        'errors': errors,
-        'warnings': warnings,
-        'column_paths': columns,
-        'dataframe': frame,
-        'row_count': preview['row_count'],
-        'validation_dataset': preview,
-        'steps': reports,
+        "errors": errors,
+        "warnings": warnings,
+        "column_paths": columns,
+        "dataframe": frame,
+        "row_count": preview["row_count"],
+        "validation_dataset": preview,
+        "steps": reports,
     }

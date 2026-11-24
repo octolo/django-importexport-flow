@@ -32,7 +32,7 @@ from .models import (
 )
 
 SAMPLE_FIXTURE_PREFIX = "Sample fixture —"
-_FIXTURES = Path(__file__).resolve().parent / 'importexport_fixtures'
+_FIXTURES = Path(__file__).resolve().parent / "importexport_fixtures"
 _SAMPLE_MODELS = (
     GenericBookmark,
     FieldShowcaseDetail,
@@ -80,10 +80,10 @@ def _load_definition_files() -> tuple[int, int]:
         import_export_configuration(json.loads(path.read_text(encoding="utf-8")))
         exports += 1
     import_payloads = [
-        json.loads(path.read_text(encoding='utf-8'))
-        for path in sorted(_FIXTURES.glob('report_import_*.json'))
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(_FIXTURES.glob("report_import_*.json"))
     ]
-    for payload in sorted(import_payloads, key=lambda data: bool(data.get('steps'))):
+    for payload in sorted(import_payloads, key=lambda data: bool(data.get("steps"))):
         import_import_definition(payload)
         imports += 1
     return exports, imports

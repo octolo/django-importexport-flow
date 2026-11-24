@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from copy import copy
 from typing import Any
 
+from django.contrib import messages
 from django.contrib.admin.widgets import ForeignKeyRawIdWidget
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.serializers.base import DeserializationError
+from django.db import IntegrityError
+from django.http import HttpRequest
 from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 
@@ -17,6 +24,9 @@ from ..engine.core.formats import (
     STRUCTURED_DATA,
     formats_for_definition,
 )
+from ..utils.serialization import COLUMN_TRANSLATIONS_KEY, STEPS_KEY
+
+logger = logging.getLogger(__name__)
 
 _EMPTY = "—"
 _ICON = (
@@ -168,23 +178,6 @@ def columns_column(model_admin: Any, obj: Any) -> str:
     return _badges(model_admin, badges)
 
 
-"""Shared admin logic for JSON report configuration import."""
-
-
-import logging
-from collections.abc import Callable
-
-from django.contrib import messages
-from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.serializers.base import DeserializationError
-from django.db import IntegrityError
-from django.http import HttpRequest
-
-from ..utils.serialization import COLUMN_TRANSLATIONS_KEY, STEPS_KEY
-
-logger = logging.getLogger(__name__)
-
-
 def run_json_configuration_import(
     request: HttpRequest,
     form: Any,
@@ -203,8 +196,8 @@ def run_json_configuration_import(
     ):
         raise PermissionDenied
     if STEPS_KEY in form.import_data and not all(
-        request.user.has_perm(f'django_importexport_flow.{action}_step')
-        for action in ('add', 'change', 'delete')
+        request.user.has_perm(f"django_importexport_flow.{action}_step")
+        for action in ("add", "change", "delete")
     ):
         raise PermissionDenied
     try:
