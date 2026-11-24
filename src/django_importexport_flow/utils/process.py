@@ -10,11 +10,16 @@ from typing import Any, cast
 import pandas as pd
 from django.http import HttpResponse
 
+from ..engine.core.dataset import ImportTemplateDataset
 from ..engine.core.export import (
     snapshot_export_filter_payload,
     snapshot_export_manager_kwargs_payload,
 )
-from ..engine.core.hooks import run_export_hooks, run_import_hook
+from ..engine.core.hooks import (
+    run_export_hooks,
+    run_import_hook,
+    run_import_template_hook,
+)
 from ..engine.core.import_ import (
     create_import_request,
     effective_import_column_paths,
@@ -36,7 +41,7 @@ from .lookup import (
     get_export_definition_by_uuid_or_named_id,
     get_import_definition_by_uuid_or_named_id,
 )
-from .translations import language_candidates
+from .translations import import_header_aliases, language_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -508,11 +513,68 @@ def _template_header_aliases(configuration: dict[str, Any], columns: list[str]) 
             "template_labels_by_language must map languages to label lists."
         )
     for labels in (configuration.get("template_labels") or columns, *translated.values()):
-        for label, column in zip(_validate_example_labels(labels, columns), columns, strict=True):
-            key = label.strip()
-            if not key or aliases.setdefault(key, column) != column:
-                raise ValueError(f"Empty or ambiguous template header: {label!r}.")
+        _add_template_label_aliases(aliases, columns, _validate_example_labels(labels, columns))
     return aliases
+
+
+def _add_template_label_aliases(
+    aliases: dict[str, str], columns: list[str], labels: list[str]
+) -> None:
+    for label, column in zip(labels, columns, strict=True):
+        key = label.strip()
+        if not key or aliases.setdefault(key, column) != column:
+            raise ValueError(f"Empty or ambiguous template header: {label!r}.")
+
+
+def _translated_template_aliases(
+    definition: Definition,
+    configuration: dict[str, Any],
+    columns: list[str],
+) -> dict[str, str]:
+    aliases = _template_header_aliases(configuration, columns)
+    if _configured_example_columns(configuration):
+        _add_catalog_template_aliases(aliases, definition, columns)
+        return aliases
+    steps = list(definition.steps.select_related("definition__target").order_by("position", "pk"))
+    if not steps:
+        _add_catalog_template_aliases(aliases, definition, columns)
+    for step in steps:
+        _add_child_template_aliases(aliases, step.definition, columns)
+    return aliases
+
+
+def _add_child_template_aliases(
+    aliases: dict[str, str], definition: Definition, columns: list[str]
+) -> None:
+    configuration = _example_configuration(definition)
+    child_paths = _configured_example_columns(configuration) or effective_import_column_paths(
+        definition
+    )
+    _add_catalog_template_aliases(
+        aliases, definition, [path for path in columns if path in child_paths]
+    )
+    _merge_template_aliases(aliases, _template_header_aliases(configuration, child_paths), columns)
+
+
+def _merge_template_aliases(
+    aliases: dict[str, str], child_aliases: dict[str, str], columns: list[str]
+) -> None:
+    for label, column in child_aliases.items():
+        if column in columns and aliases.setdefault(label, column) != column:
+            raise ValueError(f"Empty or ambiguous template header: {label!r}.")
+
+
+def _add_catalog_template_aliases(
+    aliases: dict[str, str], definition: Definition, columns: list[str]
+) -> None:
+    target = definition.target
+    model = target.model_class() if target is not None else None
+    if model is not None:
+        for column in columns:
+            for label in import_header_aliases(model, column):
+                key = label.strip()
+                if aliases.setdefault(key, column) != column:
+                    raise ValueError(f"Empty or ambiguous template header: {label!r}.")
 
 
 def normalize_template_headers(definition: Definition, frame: pd.DataFrame) -> pd.DataFrame:
@@ -528,50 +590,98 @@ def normalize_template_headers(definition: Definition, frame: pd.DataFrame) -> p
     Raises:
         ValueError: If configured aliases or matched spreadsheet headers are ambiguous.
     """
-    configuration = _example_configuration(definition)
-    columns = _configured_example_columns(configuration)
-    if not columns:
+    aliases = _normalization_template_aliases(definition)
+    if aliases is None:
         return frame
-    aliases = _template_header_aliases(configuration, columns)
     header_keys = {str(header).strip() for header in frame.columns}
     seen: set[str] = set()
-    headers: list[Any] = []
-    for header in frame.columns:
-        key = str(header).strip()
-        column = aliases.get(key)
-        if column is None:
-            # Pandas appends numeric suffixes when a physical header is repeated.
-            base, _, suffix = key.rpartition(".")
-            base = base.strip()
-            if suffix.isdecimal() and base in aliases and base in header_keys:
-                raise ValueError(f"Duplicate template header: {header!r}.")
-            headers.append(header)
-            continue
-        if column in seen:
-            raise ValueError(f"Multiple headers map to template column {column!r}.")
-        seen.add(column)
-        headers.append(column)
+    headers = [
+        _normalized_template_header(header, aliases, header_keys, seen) for header in frame.columns
+    ]
     return frame.set_axis(headers, axis="columns")
+
+
+def _normalization_template_aliases(definition: Definition) -> dict[str, str] | None:
+    configuration = _example_configuration(definition)
+    columns = _configured_example_columns(configuration)
+    if columns and "template_hook" not in configuration:
+        return _translated_template_aliases(definition, configuration, columns)
+    if "template_hook" not in configuration and not Definition.objects.has_steps(definition.pk):
+        return None
+    template = run_import_template_hook(definition)
+    aliases = _translated_template_aliases(definition, configuration, template.columns)
+    _add_template_label_aliases(aliases, template.columns, template.labels)
+    return aliases
+
+
+def _normalized_template_header(
+    header: Any, aliases: dict[str, str], header_keys: set[str], seen: set[str]
+) -> Any:
+    key = str(header).strip()
+    column = aliases.get(key)
+    if column is None:
+        # Pandas appends numeric suffixes when a physical header is repeated.
+        base, _, suffix = key.rpartition(".")
+        base = base.strip()
+        if suffix.isdecimal() and base in aliases and base in header_keys:
+            raise ValueError(f"Duplicate template header: {header!r}.")
+        return header
+    if column in seen:
+        raise ValueError(f"Multiple headers map to template column {column!r}.")
+    seen.add(column)
+    return column
+
+
+def _example_labels(
+    configuration: dict[str, Any], paths: list[str], fallback: list[str]
+) -> list[str]:
+    raw_labels = _localized_example_value(configuration.get("template_labels_by_language"))
+    if raw_labels is None:
+        raw_labels = configuration.get("template_labels") or fallback
+    return _validate_example_labels(raw_labels, paths)
+
+
+def _single_import_template(definition: Definition) -> ImportTemplateDataset:
+    configuration = _example_configuration(definition)
+    configured_paths = _configured_example_columns(configuration)
+    if configuration.get("template_header_mode") == "localized" and not configured_paths:
+        raise ValueError("Localized template headers require template_columns.")
+    paths = configured_paths or effective_import_column_paths(definition)
+    labels = sample_headers_for_import_definition(definition, column_paths=paths)
+    if configured_paths:
+        labels = _example_labels(configuration, paths, labels)
+    return ImportTemplateDataset(columns=paths, labels=labels)
+
+
+def _combined_import_template(
+    definition: Definition, context: dict[str, Any]
+) -> ImportTemplateDataset:
+    configuration = _example_configuration(definition)
+    if _configured_example_columns(configuration):
+        return _single_import_template(definition)
+    merged: dict[str, str] = {}
+    steps = definition.steps.select_related("definition__target").order_by("position", "pk")
+    for step in steps:
+        if Definition.objects.has_steps(step.definition.pk):
+            raise ValueError("Nested combined imports are not supported.")
+        template = run_import_template_hook(step.definition, context)
+        for column, label in zip(template.columns, template.labels, strict=True):
+            merged.setdefault(column, label)
+    paths = list(merged)
+    labels = _example_labels(configuration, paths, list(merged.values()))
+    return ImportTemplateDataset(columns=paths, labels=labels)
 
 
 def _example_spreadsheet(
     definition: Definition,
     configuration: dict[str, Any],
-    paths: list[str],
-    configured_paths: list[str],
+    template: ImportTemplateDataset,
 ) -> pd.DataFrame:
+    paths, labels = template.columns, template.labels
     localized = configuration.get("template_header_mode") == "localized"
     if localized:
-        if not configured_paths:
-            raise ValueError("Localized template headers require template_columns.")
-        _template_header_aliases(configuration, paths)
-    if configured_paths:
-        raw_labels = _localized_example_value(configuration.get("template_labels_by_language"))
-        if raw_labels is None:
-            raw_labels = configuration.get("template_labels") or paths
-        labels = _validate_example_labels(raw_labels, paths)
-    else:
-        labels = sample_headers_for_import_definition(definition, column_paths=paths)
+        aliases = _translated_template_aliases(definition, configuration, paths)
+        _add_template_label_aliases(aliases, paths, labels)
     blank = [""] * len(paths)
     rows = [blank] if localized else [labels, blank]
     return pd.DataFrame(rows if paths else [], columns=labels if localized else paths)
@@ -582,7 +692,7 @@ def generate_example_file(
     *,
     example_format: str,
 ) -> tuple[bytes, str, str]:
-    """Build an example import file from configured columns or model paths.
+    """Render an import template using the definition's simple or combined hook.
 
     Args:
         import_definition: Definition providing the template configuration.
@@ -593,10 +703,13 @@ def generate_example_file(
 
     Raises:
         ValueError: If the format or template columns and labels are invalid.
+        TypeError: If a template hook does not return an ImportTemplateDataset.
     """
+    if example_format not in ("csv", "excel", "json"):
+        raise ValueError(f"example_format must be csv, excel, or json; got {example_format!r}.")
     configuration = _example_configuration(import_definition)
-    configured_paths = _configured_example_columns(configuration)
-    paths = configured_paths or effective_import_column_paths(import_definition)
+    template = run_import_template_hook(import_definition, {"example_format": example_format})
+    paths = template.columns
 
     if example_format == "json":
         df = pd.DataFrame([{p: "" for p in paths}])
@@ -607,7 +720,7 @@ def generate_example_file(
             ".json",
         )
 
-    frame = _example_spreadsheet(import_definition, configuration, paths, configured_paths)
+    frame = _example_spreadsheet(import_definition, configuration, template)
 
     if example_format == "csv":
         delim = _import_csv_delimiter(import_definition)

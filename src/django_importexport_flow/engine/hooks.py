@@ -2,16 +2,60 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.files.uploadedfile import UploadedFile
 from django.utils.translation import gettext_lazy as _
 
-from .core.dataset import ImportDataset
+from .core.dataset import ImportDataset, ImportTemplateDataset
 from .core.formats import get_format
 from .core.tabular import read_tabular_dataframe_from_bytes
 
+if TYPE_CHECKING:
+    from ..models import Definition
+
 ExportResult = tuple[bytes, str, str]
+
+
+def native_import_template(
+    definition: Definition, _context: dict[str, Any]
+) -> ImportTemplateDataset:
+    """Build a simple import schema using configured columns and translated labels.
+
+    Args:
+        definition: Import definition providing columns and the target model.
+        _context: Generation context, unused by the native simple hook.
+
+    Returns:
+        Canonical columns and labels resolved for the active Django language.
+
+    Raises:
+        ValueError: If the template configuration is invalid.
+    """
+    from ..utils.process import _single_import_template
+
+    return _single_import_template(definition)
+
+
+def native_combined_import_template(
+    definition: Definition, context: dict[str, Any]
+) -> ImportTemplateDataset:
+    """Merge child template hooks in step order, retaining the first label per key.
+
+    Args:
+        definition: Parent import definition providing the ordered steps.
+        context: Generation context passed to each child's effective hook.
+
+    Returns:
+        The ordered union of child schemas, or the explicit parent schema.
+
+    Raises:
+        ValueError: If a child schema is invalid or steps are nested.
+        TypeError: If a child hook returns the wrong dataset type.
+    """
+    from ..utils.process import _combined_import_template
+
+    return _combined_import_template(definition, context)
 
 
 def _native_export(dataset: Any, format_config: Any) -> ExportResult:

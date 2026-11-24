@@ -97,7 +97,10 @@ headers from the target model as before.
 
 Flow uses the active Django language (including regional and project-default
 fallbacks) for localized values. Without a matching label list it uses
-`template_labels` or the technical keys. Use `import_example_download_response`
+`template_labels`, then `ColumnTranslation` for the definition's target and each
+column path (including custom processor keys), then model verbose names or the
+technical keys. Explicit label lists keep priority over the catalog.
+Use `import_example_download_response`
 from `django_importexport_flow.utils.process` in your own views to share the
 admin's template generator and filename resolution. Without a matching filename,
 it uses the caller's fallback or the definition name.
@@ -106,10 +109,74 @@ For a custom processor, set `"template_header_mode": "localized"` to generate
 CSV and Excel templates with only the translated header row. The processor
 must call `normalize_template_headers(definition, dataframe)` from
 `django_importexport_flow.utils.process` after reading the file. It maps labels
-from all configured languages back to the technical keys, regardless of the
-active language or column order. Technical headers remain valid, and unrelated
+from all configured languages and the `ColumnTranslation` catalog back to the
+technical keys, regardless of the active language or column order. Technical
+headers remain valid, and unrelated
 headers are left unchanged. Ambiguous aliases and multiple headers mapping to
 the same key are rejected. JSON still uses technical keys.
+
+#### Simple and combined template hooks
+
+Template generation has two native hooks, separate from the business import
+processor:
+
+- `django_importexport_flow.engine.hooks.native_import_template` builds the
+  existing simple template schema.
+- `django_importexport_flow.engine.hooks.native_combined_import_template` calls
+  each child's effective template hook in `(position, pk)` order and merges its
+  schema. A shared **technical path** appears only once, with the first child's
+  label retained even if later children use another label. Identical labels on
+  different paths do not merge the columns.
+
+The choice uses the current database steps, not a cached `step_count`.
+Child labels use their own targets and `ColumnTranslation` catalogs; the parent
+does not replace them with labels derived from its own model. Parent
+`template_columns` retains its existing behavior and replaces the automatic
+merge with an explicit simple schema. Without it, parent label lists may override
+the merged labels if they provide one label per merged column.
+The parent still controls the CSV delimiter, filename and header mode.
+`template_header_mode: "localized"` works for an automatically merged schema
+without parent `template_columns`. Duplicate or ambiguous localized headers
+are rejected; the default technical headers can retain identical display labels.
+
+Set `template_hook` on the spreadsheet `CategoryConfig.configuration` to replace
+the selected hook for either a child or the parent:
+
+```json
+{
+  "template_hook": "myapp.import_templates.custom_combined_template"
+}
+```
+
+Hooks receive `(definition, context)` and must return an `ImportTemplateDataset`
+from `django_importexport_flow.engine.core.dataset`. Its `columns` are unique,
+non-empty technical paths and its `labels` contains one string per column.
+During file generation, `context["example_format"]` is `csv`, `excel`, or `json`;
+header normalization calls hooks with an empty context. A custom hook can delegate
+to either native hook and modify the returned schema:
+
+```python
+from django_importexport_flow.engine.core.dataset import ImportTemplateDataset
+from django_importexport_flow.engine.hooks import native_combined_import_template
+from django_importexport_flow.models import Definition
+
+
+def custom_combined_template(
+    definition: Definition, context: dict[str, object]
+) -> ImportTemplateDataset:
+    template = native_combined_import_template(definition, context)
+    template.columns.append("comment")
+    template.labels.append("Comment")
+    return template
+```
+
+Flow renders this schema into CSV, Excel or JSON using the existing layouts.
+For localized custom labels, provide catalog entries or
+`template_labels_by_language` when headers must be recognized in other languages.
+Template generation never runs business processors or creates import requests.
+Nested combined imports remain unsupported. Native hooks are always allowed;
+custom paths follow `ALLOWED_HOOK_MODULE_PREFIXES`. Invalid hook results and hook
+exceptions propagate rather than falling back to another template.
 
 ### Partial import
 

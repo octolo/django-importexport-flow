@@ -12,7 +12,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.utils.translation import override
 from openpyxl import load_workbook
 
-from django_importexport_flow.models import Definition
+from django_importexport_flow.models import ColumnTranslation, Definition
 from django_importexport_flow.utils.process import (
     generate_example_file,
     import_example_download_response,
@@ -201,6 +201,28 @@ def test_configured_template_rejects_misaligned_labels():
 
     with pytest.raises(ValueError, match="one string per template column"):
         generate_example_file(definition, example_format="csv")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("language,label", [("fr", "Titulaire"), ("en-gb", "Holder")])
+def test_configured_template_uses_column_translation_and_accepts_other_languages(language, label):
+    """Use the catalog for processor keys as well as real model fields."""
+    target = ContentType.objects.get_for_model(Book)
+    definition = Definition.objects.create(direction="import", name="Catalog", target=target)
+    attach_import_spreadsheet(
+        definition, {"template_columns": ["holder"], "template_header_mode": "localized"}
+    )
+    for code, text in (("fr", "Titulaire"), ("en", "Holder")):
+        ColumnTranslation.objects.create(
+            content_type=target, path="holder", language=code, label=text
+        )
+
+    with override(language):
+        body, _, _ = generate_example_file(definition, example_format="csv")
+        normalized = normalize_template_headers(definition, pd.DataFrame([{"Titulaire": "Ada"}]))
+
+    assert list(csv.reader(StringIO(body.decode()))) == [[label], [""]]
+    assert normalized.to_dict("records") == [{"holder": "Ada"}]
 
 
 @pytest.mark.django_db

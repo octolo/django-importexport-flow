@@ -10,7 +10,7 @@ from django.core.files.utils import validate_file_name
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
-from .dataset import ExportDataset, ImportDataset
+from .dataset import ExportDataset, ImportDataset, ImportTemplateDataset
 from .formats import (
     detect_import_format,
     get_export_config,
@@ -21,7 +21,7 @@ from .formats import (
 from .overrides import merge_format_overrides
 
 if TYPE_CHECKING:
-    from ...models import ExportRequest
+    from ...models import Definition, ExportRequest
 
 ExportResult = tuple[bytes, str, str]
 
@@ -29,7 +29,10 @@ ExportResult = tuple[bytes, str, str]
 def _native_hook_paths() -> set[str]:
     from .formats import registered_formats
 
-    paths: set[str] = set()
+    paths: set[str] = {
+        "django_importexport_flow.engine.hooks.native_import_template",
+        "django_importexport_flow.engine.hooks.native_combined_import_template",
+    }
     for spec in registered_formats():
         paths.add(spec.default_export_hook)
         paths.add(spec.default_import_hook)
@@ -57,6 +60,45 @@ def _load_hook(path: str) -> Any:
     if not callable(hook):
         raise TypeError(f"Hook {path!r} is not callable.")
     return hook
+
+
+def _import_template_hook_path(definition: Definition) -> str:
+    from ...models import Definition
+    from ...utils.process import _example_configuration
+
+    path = _example_configuration(definition).get("template_hook")
+    if path is None:
+        combined = Definition.objects.has_steps(definition.pk)
+        name = "native_combined_import_template" if combined else "native_import_template"
+        return f"django_importexport_flow.engine.hooks.{name}"
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("template_hook must be a non-empty dotted callable path.")
+    return path
+
+
+def run_import_template_hook(
+    definition: Definition,
+    context: dict[str, Any] | None = None,
+) -> ImportTemplateDataset:
+    """Select a template hook using the current steps and validate its schema.
+
+    Args:
+        definition: Import definition providing the hook configuration and steps.
+        context: Optional generation context passed to the selected hook.
+
+    Returns:
+        A validated schema containing canonical columns and localized labels.
+
+    Raises:
+        ValueError: If the hook path or returned schema is invalid.
+        TypeError: If the hook is not callable or returns the wrong dataset type.
+        ValidationError: If a custom hook is outside the configured allowlist.
+    """
+    result = _load_hook(_import_template_hook_path(definition))(definition, dict(context or {}))
+    if not isinstance(result, ImportTemplateDataset):
+        raise TypeError("Template hook must return an ImportTemplateDataset.")
+    result.validate()
+    return result
 
 
 def default_export_filenames(export_request: ExportRequest, extension: str) -> tuple[str, str]:

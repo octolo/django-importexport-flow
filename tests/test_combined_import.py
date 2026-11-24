@@ -1,3 +1,8 @@
+import csv
+import json
+from io import BytesIO, StringIO
+
+import pandas as pd
 import pytest
 from django.contrib.admin.widgets import (
     FilteredSelectMultiple,
@@ -7,10 +12,18 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils.translation import override
+from openpyxl import load_workbook
 
+from django_importexport_flow.engine.core.dataset import ImportTemplateDataset
 from django_importexport_flow.engine.core.processor import ImportProcessorResult
 from django_importexport_flow.engine.core.run import relaunch_import_request
+from django_importexport_flow.engine.hooks import (
+    native_combined_import_template,
+    native_import_template,
+)
 from django_importexport_flow.models import (
+    ColumnTranslation,
     Definition,
     ExportDefinition,
     ImportDefinition,
@@ -18,12 +31,16 @@ from django_importexport_flow.models import (
     Step,
 )
 from django_importexport_flow.tasks import execute_import_request_by_uuid
-from django_importexport_flow.utils.process import process_import
+from django_importexport_flow.utils.process import (
+    generate_example_file,
+    normalize_template_headers,
+    process_import,
+)
 from django_importexport_flow.utils.serialization import (
     import_import_definition,
     serialize_import_definition,
 )
-from tests.sample.models import Author
+from tests.sample.models import Author, Book
 from tests.support import attach_import_spreadsheet
 
 
@@ -64,6 +81,217 @@ def combined(settings, tmp_path):
 
 def _upload():
     return SimpleUploadedFile("import.csv", b"name\nFirst\n")
+
+
+def _template_with_extra_column(definition, context):
+    template = native_import_template(definition, context)
+    template.columns.append("computed")
+    template.labels.append(f"Extra {context.get('example_format', 'csv')}")
+    return template
+
+
+def _parent_template_override(definition, context):
+    template = native_combined_import_template(definition, context)
+    return ImportTemplateDataset(columns=template.columns[-1:], labels=template.labels[-1:])
+
+
+def _invalid_template(_definition, _context):
+    return None
+
+
+def _invalid_template_schema(_definition, _context):
+    return ImportTemplateDataset(columns=["name"], labels=[])
+
+
+def _raising_template(_definition, _context):
+    raise ValueError("Template generation failed")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("file_format", ["csv", "excel", "json"])
+@pytest.mark.parametrize("language", ["fr", "en-gb"])
+@pytest.mark.parametrize("localized", [False, True])
+def test_combined_template_merges_child_hooks_and_catalog(
+    combined, file_format, language, localized
+):
+    """Merge by key in step order, including different targets and child overrides."""
+    parent, first, second = combined
+    parent = Definition.objects.get(pk=parent.pk)
+    assert parent.step_count == 2
+    second.target = ContentType.objects.get_for_model(Book)
+    second.save()
+    for definition, columns in (
+        (first, ["name", "reference"]),
+        (second, ["reference", "quantity"]),
+    ):
+        category = definition.category_configs.get(category_key="spreadsheet")
+        category.configuration = {"template_columns": columns}
+        if definition == second:
+            category.configuration["template_hook"] = (
+                "tests.test_combined_import._template_with_extra_column"
+            )
+        category.save()
+    for target, path, labels in (
+        (first.target, "name", ("Nom", "Name")),
+        (first.target, "reference", ("Référence", "Reference")),
+        (second.target, "reference", ("Autre référence", "Other reference")),
+        (second.target, "quantity", ("Quantité", "Quantity")),
+    ):
+        for code, label in zip(("fr", "en"), labels, strict=True):
+            ColumnTranslation.objects.create(
+                content_type=target, path=path, language=code, label=label
+            )
+    if localized:
+        category = parent.category_configs.get(category_key="spreadsheet")
+        category.configuration = {"template_header_mode": "localized"}
+        category.save()
+
+    with override(language):
+        body, _, extension = generate_example_file(parent, example_format=file_format)
+
+    columns = ["name", "reference", "quantity", "computed"]
+    labels = (
+        ["Nom", "Référence", "Quantité"] if language == "fr" else ["Name", "Reference", "Quantity"]
+    ) + [f"Extra {file_format}"]
+    if file_format == "json":
+        assert extension == ".json"
+        assert json.loads(body) == [dict.fromkeys(columns, "")]
+    else:
+        if file_format == "csv":
+            rows = list(csv.reader(StringIO(body.decode())))
+            assert extension == ".csv"
+        else:
+            workbook = load_workbook(BytesIO(body))
+            rows = [list(row) for row in workbook["Sheet1"].values]
+            workbook.close()
+            assert extension == ".xlsx"
+        assert rows[:-1] == ([labels] if localized else [columns, labels])
+        assert all(not cell for cell in rows[-1])
+    assert not Author.objects.exists()
+    assert not Book.objects.exists()
+    assert not ImportRequest.objects.exists()
+
+
+@pytest.mark.django_db
+def test_combined_template_honors_parent_hook_and_explicit_columns(combined):
+    parent, _, second = combined
+    child_category = second.category_configs.get(category_key="spreadsheet")
+    child_category.configuration["template_hook"] = (
+        "tests.test_combined_import._template_with_extra_column"
+    )
+    child_category.save()
+    category = parent.category_configs.get(category_key="spreadsheet")
+    category.configuration = {
+        "template_hook": "tests.test_combined_import._parent_template_override"
+    }
+    category.save()
+    body, _, _ = generate_example_file(parent, example_format="json")
+    assert json.loads(body) == [{"computed": ""}]
+
+    category.configuration = {"template_columns": ["parent_key"], "template_labels": ["Parent"]}
+    category.save()
+    body, _, _ = generate_example_file(parent, example_format="csv")
+    assert list(csv.reader(StringIO(body.decode()))) == [["parent_key"], ["Parent"], [""]]
+
+
+@pytest.mark.django_db
+def test_template_dispatch_uses_current_steps_and_simple_override(combined):
+    parent, first, _ = combined
+    parent.steps.all().delete()
+    stale = Definition.objects.get(pk=parent.pk)
+    assert stale.step_count == 0
+    Step.objects.create(parent=parent, definition=first, position=10)
+    category = first.category_configs.get(category_key="spreadsheet")
+    category.configuration = {"template_columns": ["child_key"]}
+    category.save()
+    body, _, _ = generate_example_file(stale, example_format="json")
+    assert json.loads(body) == [{"child_key": ""}]
+
+    category.configuration["template_hook"] = (
+        "tests.test_combined_import._template_with_extra_column"
+    )
+    category.save()
+    body, _, _ = generate_example_file(first, example_format="json")
+    assert json.loads(body) == [{"child_key": "", "computed": ""}]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "hook,error,message",
+    [
+        ("tests.test_combined_import._invalid_template", TypeError, "ImportTemplateDataset"),
+        ("tests.test_combined_import._invalid_template_schema", ValueError, "one string per"),
+        ("tests.test_combined_import._raising_template", ValueError, "Template generation failed"),
+        (
+            "tests.test_validate_import.generate_example_file",
+            ValidationError,
+            "allowed hook modules",
+        ),
+        ([], ValueError, "dotted callable path"),
+    ],
+)
+def test_template_hook_rejects_invalid_or_disallowed_overrides(combined, hook, error, message):
+    parent, first, _ = combined
+    category = first.category_configs.get(category_key="spreadsheet")
+    category.configuration["template_hook"] = hook
+    category.save()
+    with pytest.raises(error, match=message):
+        generate_example_file(parent, example_format="csv")
+
+
+@pytest.mark.django_db
+def test_combined_template_normalizes_translations_from_child_targets(combined):
+    parent, first, second = combined
+    second.target = ContentType.objects.get_for_model(Book)
+    second.save()
+    for definition, path, language, label in (
+        (first, "holder", "fr", "Titulaire"),
+        (second, "quantity", "en", "Quantity"),
+    ):
+        category = definition.category_configs.get(category_key="spreadsheet")
+        category.configuration = {"template_columns": [path]}
+        category.save()
+        ColumnTranslation.objects.create(
+            content_type=definition.target, path=path, language=language, label=label
+        )
+
+    with override("en"):
+        frame = normalize_template_headers(
+            parent, pd.DataFrame([{"Titulaire": "Ada", "Quantity": 2}])
+        )
+
+    assert frame.to_dict("records") == [{"holder": "Ada", "quantity": 2}]
+
+
+@pytest.mark.django_db
+def test_combined_template_rejects_nested_steps(combined):
+    parent, first, second = combined
+    Step.objects.bulk_create([Step(parent=first, definition=second, position=10)])
+    with pytest.raises(ValueError, match="Nested combined imports"):
+        generate_example_file(parent, example_format="csv")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("localized", [False, True])
+def test_combined_template_keeps_distinct_paths_with_identical_labels(combined, localized):
+    parent, first, second = combined
+    for definition, path in ((first, "holder"), (second, "quantity")):
+        category = definition.category_configs.get(category_key="spreadsheet")
+        category.configuration = {"template_columns": [path], "template_labels": ["Same label"]}
+        category.save()
+    if localized:
+        category = parent.category_configs.get(category_key="spreadsheet")
+        category.configuration = {"template_header_mode": "localized"}
+        category.save()
+        with pytest.raises(ValueError, match="ambiguous template header"):
+            generate_example_file(parent, example_format="csv")
+    else:
+        body, _, _ = generate_example_file(parent, example_format="csv")
+        assert list(csv.reader(StringIO(body.decode()))) == [
+            ["holder", "quantity"],
+            ["Same label", "Same label"],
+            ["", ""],
+        ]
 
 
 @pytest.mark.django_db

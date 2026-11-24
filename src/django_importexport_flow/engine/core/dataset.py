@@ -31,3 +31,32 @@ class ImportDataset:
     headers: list[str]
     format_key: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ImportTemplateDataset:
+    """Canonical columns and localized labels, before a template is rendered."""
+
+    columns: list[str]
+    labels: list[str]
+
+    def validate(self) -> None:
+        """Reject malformed hook results before rendering or combining them."""
+        self._validate_columns()
+        self._validate_labels()
+        if len({column.strip() for column in self.columns}) != len(self.columns):
+            raise ValueError("Template column keys must be unique.")
+
+    def _validate_columns(self) -> None:
+        if not isinstance(self.columns, list) or not all(
+            isinstance(column, str) and column.strip() for column in self.columns
+        ):
+            raise ValueError("Template columns must be a list of non-empty strings.")
+
+    def _validate_labels(self) -> None:
+        if (
+            not isinstance(self.labels, list)
+            or len(self.labels) != len(self.columns)
+            or not all(isinstance(label, str) for label in self.labels)
+        ):
+            raise ValueError("Template labels must provide one string per template column.")
