@@ -16,6 +16,7 @@ from ..engine.core.export import (
     snapshot_export_manager_kwargs_payload,
 )
 from ..engine.core.hooks import (
+    build_export_dataset,
     run_export_hooks,
     run_import_hook,
     run_import_template_hook,
@@ -606,7 +607,11 @@ def _normalization_template_aliases(definition: Definition) -> dict[str, str] | 
     columns = _configured_example_columns(configuration)
     if columns and "template_hook" not in configuration:
         return _translated_template_aliases(definition, configuration, columns)
-    if "template_hook" not in configuration and not Definition.objects.has_steps(definition.pk):
+    if (
+        "template_hook" not in configuration
+        and definition.template_export_id is None
+        and not Definition.objects.has_steps(definition.pk)
+    ):
         return None
     template = run_import_template_hook(definition)
     aliases = _translated_template_aliases(definition, configuration, template.columns)
@@ -654,7 +659,7 @@ def _single_import_template(definition: Definition) -> ImportTemplateDataset:
 
 
 def _combined_import_template(
-    definition: Definition, context: dict[str, Any]
+    definition: Definition, context: dict[str, Any], *, use_hooks: bool = True
 ) -> ImportTemplateDataset:
     configuration = _example_configuration(definition)
     if _configured_example_columns(configuration):
@@ -664,7 +669,12 @@ def _combined_import_template(
     for step in steps:
         if Definition.objects.has_steps(step.definition.pk):
             raise ValueError("Nested combined imports are not supported.")
-        template = run_import_template_hook(step.definition, context)
+        template = (
+            run_import_template_hook(step.definition, context)
+            if use_hooks
+            else _single_import_template(step.definition)
+        )
+        template.validate()
         for column, label in zip(template.columns, template.labels, strict=True):
             merged.setdefault(column, label)
     paths = list(merged)
@@ -676,27 +686,76 @@ def _example_spreadsheet(
     definition: Definition,
     configuration: dict[str, Any],
     template: ImportTemplateDataset,
+    rows: list[list[Any]] | None = None,
 ) -> pd.DataFrame:
     paths, labels = template.columns, template.labels
     localized = configuration.get("template_header_mode") == "localized"
     if localized:
         aliases = _translated_template_aliases(definition, configuration, paths)
         _add_template_label_aliases(aliases, paths, labels)
-    blank = [""] * len(paths)
-    rows = [blank] if localized else [labels, blank]
+    if rows is None:
+        rows = [[""] * len(paths)]
+    if not localized:
+        rows = [labels, *rows]
     return pd.DataFrame(rows if paths else [], columns=labels if localized else paths)
+
+
+def _template_export_rows(
+    definition: Definition,
+    template: ImportTemplateDataset,
+    example_format: str,
+    filter_payload: dict[str, Any] | None,
+) -> list[list[Any]]:
+    """Align the linked export's technical paths with the native import schema."""
+    from ..engine.core.table import TableEngine
+
+    export = definition.template_export
+    if (
+        export is None
+        or definition.direction != Definition.Direction.IMPORT
+        or export.direction != Definition.Direction.EXPORT
+    ):
+        raise ValueError("A template export must link an import to an export definition.")
+    dataset = build_export_dataset(
+        export,
+        {**(filter_payload or {}), "export_format": example_format},
+    )
+    paths = [column["data"] for column in dataset.columns]
+    if (
+        not paths
+        or not all(isinstance(path, str) and path in template.columns for path in paths)
+        or len(set(paths)) != len(paths)
+    ):
+        raise ValueError(
+            "Template export columns must be unique technical paths from the import template."
+        )
+    if not isinstance(dataset.engine, TableEngine):
+        raise TypeError("Template exports require a tabular export engine.")
+    positions = [paths.index(path) if path in paths else None for path in template.columns]
+    source_rows = (
+        dataset.engine.get_dataframe().itertuples(index=False, name=None)
+        if example_format == "json"
+        else dataset.engine.get_rows()
+    )
+    return [
+        [row[position] if position is not None else "" for position in positions]
+        for row in source_rows
+    ]
 
 
 def generate_example_file(
     import_definition: Definition,
     *,
     example_format: str,
+    filter_payload: dict[str, Any] | None = None,
 ) -> tuple[bytes, str, str]:
     """Render an import template using the definition's simple or combined hook.
 
     Args:
         import_definition: Definition providing the template configuration.
         example_format: One of ``csv``, ``excel``, or ``json``.
+        filter_payload: Trusted export filters (``fr_*``, ``mg_*``, ``mm_*``)
+            for an optional template export. Missing required filters fail.
 
     Returns:
         File bytes, MIME type, and extension including the leading dot.
@@ -710,9 +769,14 @@ def generate_example_file(
     configuration = _example_configuration(import_definition)
     template = run_import_template_hook(import_definition, {"example_format": example_format})
     paths = template.columns
+    rows = (
+        _template_export_rows(import_definition, template, example_format, filter_payload)
+        if import_definition.template_export_id is not None
+        else None
+    )
 
     if example_format == "json":
-        df = pd.DataFrame([{p: "" for p in paths}])
+        df = pd.DataFrame(rows if rows is not None else [[""] * len(paths)], columns=paths)
         body = df.to_json(orient="records", indent=2, force_ascii=False).encode("utf-8")
         return (
             body,
@@ -720,7 +784,11 @@ def generate_example_file(
             ".json",
         )
 
-    frame = _example_spreadsheet(import_definition, configuration, template)
+    frame = _example_spreadsheet(import_definition, configuration, template, rows)
+    if rows is not None and get_setting("ESCAPE_SPREADSHEET_FORMULAS", True):
+        from ..engine.core.table import _escape_spreadsheet_formula
+
+        frame = frame.map(_escape_spreadsheet_formula)
 
     if example_format == "csv":
         delim = _import_csv_delimiter(import_definition)
@@ -750,6 +818,7 @@ def import_example_download_response(
     example_format: str,
     fallback_name: str | None = None,
     dated: bool = False,
+    filter_payload: dict[str, Any] | None = None,
 ) -> HttpResponse:
     """Generate a template attachment using the active language.
 
@@ -758,6 +827,7 @@ def import_example_download_response(
         example_format: One of ``csv``, ``excel``, or ``json``.
         fallback_name: Filename stem to use instead of the definition name.
         dated: Whether to append a timestamp before the extension.
+        filter_payload: Trusted filter context for the linked template export.
 
     Returns:
         A downloadable HTTP response with a safe filename.
@@ -765,7 +835,9 @@ def import_example_download_response(
     Raises:
         ValueError: If the format or template configuration is invalid.
     """
-    body, content_type, ext = generate_example_file(definition, example_format=example_format)
+    body, content_type, ext = generate_example_file(
+        definition, example_format=example_format, filter_payload=filter_payload
+    )
     names = _example_configuration(definition).get("template_filename")
     name = _localized_example_value(names)
     if name is not None and not isinstance(name, str):

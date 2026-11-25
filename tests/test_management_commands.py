@@ -11,7 +11,7 @@ from django.core.management.base import CommandError
 
 from django_importexport_flow.models import Definition
 from tests.sample.models import Book
-from tests.support import attach_tabular_export
+from tests.support import attach_import_spreadsheet, attach_tabular_export
 
 
 @pytest.mark.django_db
@@ -180,3 +180,38 @@ def test_generate_example_file_unknown_definition():
             "00000000-0000-0000-0000-000000000099",
             format="csv",
         )
+
+
+@pytest.mark.django_db
+def test_generate_prefilled_template_with_scoped_filters(tmp_path):
+    from django.contrib.contenttypes.models import ContentType
+
+    target = ContentType.objects.get_for_model(Book)
+    export = Definition.objects.create(
+        direction="export",
+        name="Template source",
+        target=target,
+        filter_mandatory={"kwargs": {"book": "pk"}},
+    )
+    attach_tabular_export(export, ["title"])
+    definition = Definition.objects.create(
+        direction="import", name="Prefilled template", target=target, template_export=export
+    )
+    attach_import_spreadsheet(definition, {"template_columns": ["title", "pages"]})
+    book = Book.objects.create(title="Selected")
+    Book.objects.create(title="Other")
+    output = tmp_path / "template.json"
+
+    with pytest.raises(CommandError, match="Missing filter payload"):
+        call_command(
+            "generate_example_file", definition.named_id, format="json", output=str(output)
+        )
+    assert not output.exists()
+    call_command(
+        "generate_example_file",
+        definition.named_id,
+        format="json",
+        output=str(output),
+        filter_json=json.dumps({"fr_kw_book": str(book.pk)}),
+    )
+    assert json.loads(output.read_text()) == [{"title": "Selected", "pages": ""}]

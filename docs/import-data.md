@@ -178,6 +178,72 @@ Nested combined imports remain unsupported. Native hooks are always allowed;
 custom paths follow `ALLOWED_HOOK_MODULE_PREFIXES`. Invalid hook results and hook
 exceptions propagate rather than falling back to another template.
 
+#### Export-prefilled templates
+
+Set the optional **Template export** (`Definition.template_export`) on an import
+definition to prefill its template with existing records. The admin uses a raw-ID
+lookup restricted to export definitions. Deleting a referenced export is
+protected: remove the link explicitly first.
+
+The export supplies rows using its native tabular dataset: manager, static
+filters, request filters, ordering and technical column paths. Configure the
+export for the requested format (CSV, Excel or JSON). Flow does not parse a
+rendered export file or run export format/filename hooks. Import template hooks
+are also bypassed, including child template hooks for a combined import.
+Business import processors never run during template generation.
+
+The import's **native template configuration remains the schema**:
+`template_columns`, labels, `ColumnTranslation`, header mode, delimiter and
+filename retain their normal behavior. Without explicit parent columns, a
+combined import uses the ordered union of its children's native schemas. Link
+the export on the combined parent; Flow does not join child exports.
+
+Configure both definitions with compatible **technical keys**, not merely equal
+display labels. Each exported key must occur exactly once and belong to the
+import schema. Missing import columns are filled with empty values. Unknown,
+duplicate or reverse-expanded export columns are rejected; there is no implicit
+column renaming. For example, an export of only `company_siren` can prefill:
+
+```csv
+company_siren,meeting_date,meeting_time
+000123456,,
+987654321,,
+```
+
+This example assumes localized-only headers whose labels equal those keys.
+With the default technical header mode, the descriptive labels row is retained.
+An empty export produces no data rows. Spreadsheet formula protection applies
+to exported values in CSV/Excel; JSON retains the values without that escaping.
+Generation creates neither import nor export audit requests.
+
+For editing contacts, include a stable identifier and configure the import's
+`match_fields` (and `exclude_primary_key=False` when using the primary key).
+The export/template link does **not** change create/update or blank-cell policies.
+
+Custom views pass trusted scope/filter values through the normal export payload:
+
+```python
+response = import_example_download_response(
+    import_definition,
+    example_format="csv",
+    filter_payload={"fr_kw_company_id": str(company.pk)},
+)
+```
+
+`generate_example_file` accepts the same optional `filter_payload`. Configure
+mandatory filters on the **export** to prevent an unscoped download; missing
+filters raise an error instead of returning an empty template or all records.
+API callers must enforce permissions and build this scope from trusted context;
+Flow does not infer a user's row permissions. The admin checks view/change
+permission on the associated export and displays its filter fields before
+download. The CLI accepts `--filter-json` or `--filter-json-file`, using the same
+`fr_*`, `mg_*` and `mm_*` keys as exports.
+
+JSON configuration serialization stores this link by the export's `named_id`;
+UUID references are also accepted on import. The referenced export must already
+exist. Definitions without a template export keep their existing hooks and
+empty-template behavior unchanged.
+
 ### Partial import
 
 Imports use batches of up to **`TABULAR_IMPORT_BATCH_SIZE`** (default **500**, from

@@ -41,7 +41,7 @@ from django_importexport_flow.utils.serialization import (
     serialize_import_definition,
 )
 from tests.sample.models import Author, Book
-from tests.support import attach_import_spreadsheet
+from tests.support import attach_import_spreadsheet, attach_tabular_export
 
 
 def _processor(file, context):
@@ -105,6 +105,54 @@ def _invalid_template_schema(_definition, _context):
 
 def _raising_template(_definition, _context):
     raise ValueError("Template generation failed")
+
+
+@pytest.mark.django_db
+def test_combined_template_export_bypasses_all_schema_hooks(combined):
+    parent, first, second = combined
+    for definition, columns in (
+        (parent, None),
+        (first, ["name", "reference"]),
+        (second, ["reference", "quantity"]),
+    ):
+        category = definition.category_configs.get()
+        category.configuration = {"template_hook": "invalid.must_not_run"}
+        if columns:
+            category.configuration["template_columns"] = columns
+        category.save()
+    export = ExportDefinition.objects.create(name="Combined rows", target=first.target)
+    attach_tabular_export(export, ["name"])
+    parent.template_export = export
+    parent.save()
+    Author.objects.create(name="000123456")
+
+    body, _, _ = generate_example_file(parent, example_format="json")
+
+    assert json.loads(body) == [{"name": "000123456", "reference": "", "quantity": ""}]
+    normalized = normalize_template_headers(
+        parent, pd.DataFrame([{"Author name": "000123456", "quantity": 12}])
+    )
+    assert normalized.to_dict("records") == [{"name": "000123456", "quantity": 12}]
+
+
+@pytest.mark.django_db
+def test_template_export_serialization_resolves_named_reference(combined):
+    parent, first, _second = combined
+    export = ExportDefinition.objects.create(name="Template data", target=first.target)
+    parent.template_export = export
+    parent.save()
+    payload = serialize_import_definition(parent)
+    assert payload["objects"][0]["fields"]["template_export"] == export.named_id
+
+    loaded = import_import_definition(payload)
+    assert loaded.template_export_id == export.pk
+    payload["objects"][0]["fields"]["template_export"] = str(export.pk)
+    assert import_import_definition(payload).template_export_id == export.pk
+    payload["objects"][0]["fields"]["template_export"] = first.named_id
+    with pytest.raises(ValueError, match="Template export definition not found"):
+        import_import_definition(payload)
+    parent.refresh_from_db()
+    assert parent.template_export_id == export.pk
 
 
 @pytest.mark.django_db
@@ -368,6 +416,18 @@ def test_admin_step_raw_id_lookup_uses_import_definitions(combined, admin_client
     )
     response = admin_client.get(url)
     assert response.status_code == 200
+    export_field = response.context["adminform"].form.fields["template_export"]
+    assert isinstance(export_field.widget, ForeignKeyRawIdWidget)
+    assert export_field.clean(export.pk).pk == export.pk
+    with pytest.raises(ValidationError):
+        export_field.clean(first.pk)
+    export_context = export_field.widget.get_context("template_export", export.pk, {})
+    assert export_context["related_url"].startswith(
+        reverse("admin:django_importexport_flow_exportdefinition_changelist")
+    )
+    assert export_context["link_url"] == reverse(
+        "admin:django_importexport_flow_exportdefinition_change", args=[export.pk]
+    )
     assert isinstance(
         response.context["adminform"].form.fields["exclude_relations"].widget.widget,
         FilteredSelectMultiple,

@@ -12,6 +12,7 @@ from django.utils.translation import gettext_lazy as _
 
 from ..models import ColumnTranslation, Definition, Step
 from .helpers import get_setting
+from .lookup import get_export_definition_by_uuid_or_named_id
 
 FORMAT_VERSION = get_setting("SERIALIZATION_FORMAT_VERSION")
 
@@ -163,6 +164,9 @@ def _serialize_definition(
     definition: Definition, *, include_column_translations: bool
 ) -> dict[str, Any]:
     objects = json.loads(serializers.serialize("json", _iter_tree(definition)))
+    template_export = definition.template_export
+    if template_export is not None:
+        objects[0]["fields"]["template_export"] = template_export.named_id
     payload: dict[str, Any] = {"format_version": FORMAT_VERSION, "objects": objects}
     if definition.direction == Definition.Direction.IMPORT:
         steps = list(definition.steps.select_related("definition").order_by("position", "pk"))
@@ -234,8 +238,30 @@ def _import_steps(definition: Definition, entries: Any) -> None:
         step.save()
 
 
+def _resolve_template_exports(objects: list[dict[str, Any]]) -> None:
+    for obj in objects:
+        if obj.get("model") != _DEFINITION_MODEL:
+            continue
+        fields = obj.get("fields")
+        if not isinstance(fields, dict):
+            raise ValueError(_("Definition fields must be a JSON object."))
+        reference = fields.get("template_export")
+        if reference is None:
+            continue
+        if fields.get("direction") != Definition.Direction.IMPORT or not isinstance(reference, str):
+            raise ValueError(_("A template export requires an import and an export reference."))
+        try:
+            export = get_export_definition_by_uuid_or_named_id(reference)
+        except Definition.DoesNotExist as exc:
+            raise ValueError(
+                _("Template export definition not found: %(name)s.") % {"name": reference}
+            ) from exc
+        fields["template_export"] = str(export.pk)
+
+
 def _import_definition(data: dict[str, Any], direction: str) -> Definition:
     objects = _require_current_payload(data)
+    _resolve_template_exports(objects)
     translations = data.get(COLUMN_TRANSLATIONS_KEY, [])
     if not isinstance(translations, list):
         raise ValueError(_("column_translations must be a JSON array."))

@@ -94,7 +94,17 @@ def run_import_template_hook(
         TypeError: If the hook is not callable or returns the wrong dataset type.
         ValidationError: If a custom hook is outside the configured allowlist.
     """
-    result = _load_hook(_import_template_hook_path(definition))(definition, dict(context or {}))
+    if definition.template_export_id is not None:
+        from ...models import Definition
+        from ...utils.process import _combined_import_template, _single_import_template
+
+        result = (
+            _combined_import_template(definition, dict(context or {}), use_hooks=False)
+            if Definition.objects.has_steps(definition.pk)
+            else _single_import_template(definition)
+        )
+    else:
+        result = _load_hook(_import_template_hook_path(definition))(definition, dict(context or {}))
     if not isinstance(result, ImportTemplateDataset):
         raise TypeError("Template hook must return an ImportTemplateDataset.")
     result.validate()

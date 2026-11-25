@@ -157,12 +157,37 @@ def make_export_form_class(definition: Any, *, allow_template_override: bool = F
 
 
 class ImportExampleFileForm(forms.Form):
-    """Choose CSV, Excel, or JSON for the empty import template (admin download)."""
+    """Choose a template format and any linked export's filter context."""
 
     example_format = forms.ChoiceField(
         label=_("Format"),
         choices=EXPORT_FORMAT_CHOICES,
         initial="csv",
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        source = getattr(self.__class__, "_filter_context_source", None)
+        if source is not None:
+            attach_filter_context_fields(self, source)
+            reorder_filter_fields_first(self, (), ("example_format",))
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean()
+        source = getattr(self.__class__, "_filter_context_source", None)
+        if not isinstance(cleaned, dict):
+            return {}
+        if source is not None:
+            clean_filter_context_data(self, cleaned, source)
+        return cleaned
+
+
+def make_import_example_form_class(definition: Any):
+    """Bind the example download form to its optional export filter configuration."""
+    return type(
+        f"ImportExampleForm_{definition.pk}",
+        (ImportExampleFileForm,),
+        {"_filter_context_source": definition.template_export},
     )
 
 

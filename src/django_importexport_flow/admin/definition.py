@@ -14,9 +14,9 @@ from ..engine.core.import_ import create_import_request
 from ..forms import (
     MAX_TABULAR_IMPORT_BYTES,
     ExportConfigurationImportForm,
-    ImportExampleFileForm,
     TabularImportForm,
     make_export_form_class,
+    make_import_example_form_class,
     make_tabular_import_form_class,
 )
 from ..models import (
@@ -373,6 +373,7 @@ def _import_result_message(request, ask) -> None:
 
 
 class ImportWorkflow:
+    raw_id_fields = ("template_export",)
     filter_horizontal = ("exclude_relations",)
     list_display = (
         "definition_label",
@@ -393,6 +394,16 @@ class ImportWorkflow:
         "created_at",
         "updated_at",
     )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "template_export":
+            kwargs["widget"] = proxy_raw_id_widget(
+                db_field,
+                self.admin_site,
+                ExportDefinition,
+                using=kwargs.get("using"),
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description=_("Definition"), ordering="named_id")
     def definition_label(self, obj):
@@ -438,6 +449,7 @@ class ImportWorkflow:
             _("Import"),
             {
                 "fields": (
+                    "template_export",
                     "columns_exclude",
                     "exclude_primary_key",
                     "max_relation_hops",
@@ -492,12 +504,22 @@ class ImportWorkflow:
 
     @admin_boost_view("adminform", _("Example import file"))
     def download_example_file(self, request, obj, form=None):
+        if obj.template_export_id is not None:
+            export_admin = self.admin_site.get_model_admin(ExportDefinition)
+            if not export_admin.has_view_or_change_permission(request, obj.template_export):
+                raise PermissionDenied
         if form is None:
-            return {"form": ImportExampleFileForm()}
+            return {"form": make_import_example_form_class(obj)()}
         fmt = form.cleaned_data["example_format"]
         try:
-            return import_example_download_response(obj, example_format=fmt, dated=True)
-        except ValueError as exc:
+            return import_example_download_response(
+                obj,
+                example_format=fmt,
+                dated=True,
+                filter_payload=form.cleaned_data,
+            )
+        except (ValueError, ValidationError, TypeError) as exc:
+            logger.warning("Import template generation failed for pk=%s: %s", obj.pk, exc)
             form.add_error("example_format", str(exc))
             return {"form": form}
 

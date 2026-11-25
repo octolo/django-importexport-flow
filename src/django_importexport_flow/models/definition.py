@@ -158,6 +158,19 @@ class Definition(AuditMixin, models.Model):
         verbose_name=_("Exclude primary key"),
         help_text=_("Import only. Omit the target primary key from the default column set."),
     )
+    template_export = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        limit_choices_to={"direction": "export"},
+        related_name="prefilled_imports",
+        verbose_name=_("Template export"),
+        help_text=_(
+            "Import only. Optional export supplying template rows. "
+            "Its technical column keys must belong to the native import template."
+        ),
+    )
     match_fields = models.JSONField(
         default=list,
         blank=True,
@@ -220,6 +233,7 @@ class Definition(AuditMixin, models.Model):
             self._clean_import(model)
 
     def _clean_unused_direction_fields(self) -> None:
+        self._clean_template_export()
         if self.direction == self.Direction.IMPORT and self.filename_hook:
             raise ValidationError({"filename_hook": _("Filename hooks are only used for exports.")})
         if self.direction == self.Direction.EXPORT and (
@@ -238,6 +252,16 @@ class Definition(AuditMixin, models.Model):
             raise ValidationError(
                 _("Export manager options cannot be set on an import definition.")
             )
+
+    def _clean_template_export(self) -> None:
+        if self.template_export_id is None:
+            return
+        if self.direction != self.Direction.IMPORT:
+            raise ValidationError({"template_export": _("Only imports can use a template export.")})
+        if not Definition.objects.filter(
+            pk=self.template_export_id, direction=self.Direction.EXPORT
+        ).exists():
+            raise ValidationError({"template_export": _("Select an export definition.")})
 
     def _clean_export(self, model: type[models.Model]) -> None:
         validate_export_filter_manager_disjoint(self)
